@@ -3,6 +3,15 @@
 一个使用 Kotlin 与 Jetpack Compose 开发的 Android 应用，用于查看大模型 API
 价格、官方渠道和通知，并可通过 OpenAI Chat Completions 兼容接口调用真实 AI。
 
+## 后续方向：Personal Gateway Plus
+
+项目计划扩展为个人大模型 API 中转与管理平台，增加模型/价格/活动聚合、API 分组、
+人工优先级和故障自动路由。规划功能尚未并入当前 Android 版本，详细设计见：
+
+- [产品与总体架构](docs/personal-gateway-plus/README.md)
+- [模块与自动路由设计](docs/personal-gateway-plus/MODULES.md)
+- [开发路线图与协作拆分](docs/personal-gateway-plus/ROADMAP.md)
+
 ## 当前改进
 
 - 所有模型价格统一为“每 100 万 tokens”。
