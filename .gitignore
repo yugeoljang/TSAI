@@ -13,3 +13,35 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# ============================================================
+# Python 后端 (server/)
+# ============================================================
+server/.venv/
+server/venv/
+server/.env
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+server/data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ============================================================
+# Web 前端 (web/)
+# ============================================================
+web/node_modules/
+web/dist/
+web/.next/
+web/.nuxt/
+web/.env.local
+web/.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*

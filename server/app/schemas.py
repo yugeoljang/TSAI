@@ -1,0 +1,315 @@
+"""Pydantic 请求 / 响应模型，严格对齐 contracts/openapi.yaml 的 schema 定义。
+
+字段名、可空性、默认值均与 OpenAPI 契约一致；Android 兼容 DTO 字段名严格对齐
+现有 Kotlin data class（ModelProvider.kt / LlmModel.kt / PriceNews.kt / Channel.kt）。
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+# ============================================================
+# 统一错误
+# ============================================================
+class ErrorDetail(BaseModel):
+    code: int
+    type: str
+    message: str
+    requestId: str | None = None
+    details: list[dict] | None = None
+
+
+class ErrorEnvelope(BaseModel):
+    error: ErrorDetail
+
+
+# ============================================================
+# 供应商
+# ============================================================
+class Provider(BaseModel):
+    id: str
+    name: str
+    protocolType: str = "OPENAI_COMPATIBLE"
+    officialUrl: str | None = None
+    pricingUrl: str | None = None
+    enabled: bool = True
+    createdAt: str
+    updatedAt: str
+
+
+class ProviderCreate(BaseModel):
+    name: str
+    officialUrl: str | None = None
+    pricingUrl: str | None = None
+    enabled: bool = True
+
+
+class ProviderUpdate(BaseModel):
+    name: str | None = None
+    officialUrl: str | None = None
+    pricingUrl: str | None = None
+    enabled: bool | None = None
+
+
+# ============================================================
+# 上游 API（API Key 加密保存，响应仅返回后四位）
+# ============================================================
+class UpstreamEndpoint(BaseModel):
+    id: str
+    providerId: str
+    displayName: str
+    baseUrl: str
+    apiKeyLastFour: str
+    defaultModel: str | None = None
+    enabled: bool = True
+    timeoutMs: int = 15000
+    createdAt: str
+    updatedAt: str
+
+
+class UpstreamCreate(BaseModel):
+    providerId: str
+    displayName: str
+    baseUrl: str
+    apiKey: str = Field(description="写入时加密保存，永不回显")
+    defaultModel: str | None = None
+    enabled: bool = True
+    timeoutMs: int = 15000
+
+
+class UpstreamUpdate(BaseModel):
+    displayName: str | None = None
+    baseUrl: str | None = None
+    apiKey: str | None = Field(default=None, description="可选；不传则保持原 Key")
+    defaultModel: str | None = None
+    enabled: bool | None = None
+    timeoutMs: int | None = None
+
+
+# ============================================================
+# 模型 / 价格 / 活动
+# ============================================================
+class ModelCatalogEntry(BaseModel):
+    id: str
+    providerId: str
+    upstreamModelId: str
+    displayName: str
+    contextWindow: int | None = None
+    enabled: bool = True
+    sourceUrl: str | None = None
+    verifiedAt: str | None = None
+
+
+class PriceSnapshot(BaseModel):
+    id: str
+    providerId: str
+    modelCatalogEntryId: str
+    currency: str = "CNY"
+    inputPricePerMillionTokens: float | None = None
+    outputPricePerMillionTokens: float | None = None
+    sourceUrl: str | None = None
+    effectiveFrom: str | None = None
+    verifiedAt: str | None = None
+
+
+class Promotion(BaseModel):
+    id: str
+    providerId: str
+    title: str
+    type: str
+    description: str | None = None
+    sourceUrl: str | None = None
+    startsAt: str | None = None
+    endsAt: str | None = None
+    active: bool = False
+    verifiedAt: str | None = None
+
+
+# ============================================================
+# API 分组与成员
+# ============================================================
+class ApiGroup(BaseModel):
+    id: str
+    name: str
+    routeKey: str
+    routingPolicy: str = "ORDERED_FAILOVER"
+    maxAttempts: int = 3
+    enabled: bool = True
+    createdAt: str
+    updatedAt: str
+
+
+class ApiGroupMember(BaseModel):
+    id: str
+    groupId: str
+    upstreamEndpointId: str
+    upstreamDisplayName: str | None = None
+    upstreamModelName: str
+    priorityRank: int
+    enabled: bool = True
+
+
+class ApiGroupDetail(ApiGroup):
+    members: list[ApiGroupMember] = []
+
+
+class ApiGroupCreate(BaseModel):
+    name: str
+    routeKey: str
+    maxAttempts: int = 3
+    enabled: bool = True
+
+
+class ApiGroupUpdate(BaseModel):
+    name: str | None = None
+    maxAttempts: int | None = None
+    enabled: bool | None = None
+
+
+class ApiGroupMemberCreate(BaseModel):
+    upstreamEndpointId: str
+    upstreamModelName: str
+    priorityRank: int | None = Field(default=None, description="不传则追加到末尾")
+    enabled: bool = True
+
+
+class ApiGroupMemberUpdate(BaseModel):
+    upstreamModelName: str | None = None
+    priorityRank: int | None = None
+    enabled: bool | None = None
+
+
+class ReorderRequest(BaseModel):
+    orderedMemberIds: list[str]
+
+
+# ============================================================
+# 路由记录
+# ============================================================
+class GatewayRequest(BaseModel):
+    requestId: str
+    routeKey: str
+    startedAt: str
+    endedAt: str | None = None
+    finalStatus: str | None = None
+    finalUpstreamDisplayName: str | None = None
+    attemptCount: int = 0
+
+
+class RouteAttempt(BaseModel):
+    requestId: str
+    attemptIndex: int
+    upstreamEndpointId: str
+    upstreamDisplayName: str | None = None
+    upstreamModelName: str | None = None
+    startedAt: str
+    endedAt: str | None = None
+    resultCategory: str
+    upstreamStatusCode: int | None = None
+    durationMs: int | None = None
+    sanitizedError: str | None = None
+    retryable: bool = False
+
+
+# ============================================================
+# OpenAI 兼容 Chat Completions
+# ============================================================
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatCompletionRequest(BaseModel):
+    model: str = Field(description="分组 routeKey")
+    messages: list[ChatMessage]
+    temperature: float = 0.7
+    max_tokens: int = 1024
+    stream: bool = False
+
+
+class ChatChoiceMessage(ChatMessage):
+    pass
+
+
+class ChatChoice(BaseModel):
+    index: int
+    message: ChatChoiceMessage
+    finish_reason: str | None = None
+
+
+class ChatUsage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class ChatCompletionResponse(BaseModel):
+    id: str
+    object: str = "chat.completion"
+    choices: list[ChatChoice]
+    usage: ChatUsage | None = None
+
+
+# ============================================================
+# Android 兼容 DTO（字段名严格对齐现有 Kotlin 类）
+# ============================================================
+class AndroidChannel(BaseModel):
+    """对齐 Channel.kt"""
+    id: str
+    name: str
+    type: str
+    link: str
+    description: str | None = None
+
+
+class AndroidProvider(BaseModel):
+    """对齐 ModelProvider.kt"""
+    id: str
+    name: str
+    logoUrl: str | None = None
+    websiteUrl: str
+    region: str = "global"
+    channels: list[AndroidChannel] = []
+    apiBaseUrl: str | None = None
+    apiKey: str | None = None  # 后端永不返回真实 Key，恒为 null
+    chatModel: str | None = None
+    supportsOpenAiChat: bool = False
+
+
+class AndroidLlmModel(BaseModel):
+    """对齐 LlmModel.kt"""
+    id: str
+    providerId: str
+    name: str
+    contextWindow: int | None = None
+    inputPricePerMillionTokens: float | None = None
+    outputPricePerMillionTokens: float | None = None
+    currency: str = "USD"
+    tier: str = "standard"
+    priceSourceUrl: str | None = None
+    updatedAt: str | None = None
+    priceNote: str | None = None
+
+
+class AndroidPriceNews(BaseModel):
+    """对齐 PriceNews.kt"""
+    id: str
+    providerId: str
+    title: str
+    summary: str | None = None
+    type: str
+    link: str | None = None
+    validFrom: str | None = None
+    validUntil: str | None = None
+    createdAt: str
+
+
+# ============================================================
+# 系统
+# ============================================================
+class HealthStatus(BaseModel):
+    status: str = "ok"
+    database: str = "ok"
+    version: str = "0.1.0"
