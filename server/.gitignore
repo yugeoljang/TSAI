@@ -1,0 +1,5 @@
+config/gateway.local.json
+.env
+*.db
+*.sqlite
+*.sqlite3
