@@ -1,9 +1,11 @@
 package com.example.myapplication.data.repository
 
 import com.example.myapplication.data.model.Channel
+import com.example.myapplication.data.model.ChatGroup
 import com.example.myapplication.data.model.LlmModel
 import com.example.myapplication.data.model.ModelProvider
 import com.example.myapplication.data.model.PriceNews
+import com.example.myapplication.data.model.RouteAttempt
 import com.example.myapplication.data.remote.ApiService
 
 class LlmRepository(private val apiService: ApiService) {
@@ -29,5 +31,13 @@ class LlmRepository(private val apiService: ApiService) {
         type: String? = null
     ): Result<List<PriceNews>> = runCatching {
         apiService.getNews(providerId, type)
+    }
+
+    suspend fun getGroups(): Result<List<ChatGroup>> = runCatching {
+        apiService.getGroups()
+    }
+
+    suspend fun getRouteAttempts(requestId: String): Result<List<RouteAttempt>> = runCatching {
+        apiService.getRouteAttempts(requestId)
     }
 }

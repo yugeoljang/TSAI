@@ -10,10 +10,14 @@ import com.example.myapplication.data.local.normalizeApiConfig
 import com.example.myapplication.data.local.validateApiConfig
 import com.example.myapplication.data.model.Channel
 import com.example.myapplication.data.model.ChatCompletionRequest
+import com.example.myapplication.data.model.ChatGroup
 import com.example.myapplication.data.model.ChatMessageDto
+import com.example.myapplication.data.model.GatewayCallOutcome
 import com.example.myapplication.data.model.LlmModel
 import com.example.myapplication.data.model.ModelProvider
 import com.example.myapplication.data.model.PriceNews
+import com.example.myapplication.data.model.RouteResult
+import com.example.myapplication.data.model.RouteResultMapper
 import com.example.myapplication.data.remote.NetworkModule
 import com.example.myapplication.data.remote.createChatApiService
 import com.example.myapplication.data.repository.LlmRepository
@@ -56,6 +60,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 val news = async { activeRepository.getNews() }
                 Triple(providers.await(), models.await(), news.await())
             }
+            // 分组仅用于网关路由；失败不阻断主数据加载（保持直连）
+            val liveGroups = activeRepository.getGroups().getOrNull().orEmpty()
 
             val liveProviders = providersResult.getOrNull().orEmpty()
             val liveModels = modelsResult.getOrNull().orEmpty()
@@ -79,6 +85,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 providers = providers,
                 models = liveModels.ifEmpty { referenceModels() },
                 news = liveNews.ifEmpty { referenceNews() },
+                groups = liveGroups,
                 activeProvider = selectActiveProvider(providers),
                 lastNewsRefreshAt = if (liveNews.isNotEmpty()) {
                     System.currentTimeMillis()
@@ -140,6 +147,14 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(activeProvider = provider)
     }
 
+    fun setRouteMode(mode: RouteMode) {
+        _uiState.value = _uiState.value.copy(routeMode = mode)
+    }
+
+    fun setSelectedGroup(group: ChatGroup) {
+        _uiState.value = _uiState.value.copy(selectedGroup = group)
+    }
+
     fun saveApiConfig(provider: ModelProvider, config: ApiConfig): Boolean {
         val normalized = normalizeApiConfig(config)
         validateApiConfig(normalized)?.let { message ->
@@ -186,19 +201,22 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.value = _uiState.value.copy(
                 chatMessages = conversation,
                 isAgentThinking = true,
-                error = null
+                error = null,
+                routeResult = null
             )
 
-            val active = _uiState.value.activeProvider
+            val state = _uiState.value
+            val active = state.activeProvider
             val hasCompleteConfig = active != null &&
                 !active.apiBaseUrl.isNullOrBlank() &&
                 !active.apiKey.isNullOrBlank() &&
                 !active.chatModel.isNullOrBlank()
 
-            val reply = if (hasCompleteConfig) {
-                callRealApi(active!!, conversation)
-            } else {
-                generateLocalReply(trimmed, _uiState.value)
+            val reply = when {
+                state.routeMode == RouteMode.GATEWAY && state.selectedGroup != null ->
+                    sendViaGateway(state.selectedGroup, conversation)
+                hasCompleteConfig -> callRealApi(active!!, conversation)
+                else -> generateLocalReply(trimmed, state)
             }
 
             _uiState.value = _uiState.value.copy(
@@ -272,34 +290,119 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun buildSystemPrompt(provider: ModelProvider, state: AgentUiState): String {
-        val prices = state.models.take(8).joinToString("\n") {
+    private suspend fun sendViaGateway(
+        group: ChatGroup,
+        conversation: List<ChatMessage>
+    ): ChatMessage {
+        val service = NetworkModule.gatewayChatService
+        if (service == null) {
+            _uiState.value = _uiState.value.copy(
+                routeResult = RouteResult(success = false, errorMessage = "聚合网关未配置。"),
+                error = "聚合网关未配置，请检查 AGGREGATOR_BASE_URL。"
+            )
+            return generateLocalReply(conversation.last().content, _uiState.value)
+        }
+        return try {
+            val history = conversation.takeLast(12).map { message ->
+                ChatMessageDto(
+                    role = if (message.role == "user") "user" else "assistant",
+                    content = message.content
+                )
+            }
+            val request = ChatCompletionRequest(
+                model = group.routeKey,
+                messages = listOf(
+                    ChatMessageDto("system", buildGroupSystemPrompt(group, _uiState.value))
+                ) + history
+            )
+            val response = service.chatCompletions(request)
+            val requestId = response.headers()["X-Request-Id"]
+            val upstreamHeader = response.headers()["X-Upstream"]
+            val body = response.body()
+            val replyText = body?.choices?.firstOrNull()?.message?.content
+
+            val attempts = if (requestId != null) {
+                repository?.getRouteAttempts(requestId)?.getOrNull()
+            } else null
+
+            val routeResult = RouteResultMapper.buildRouteResult(
+                outcome = GatewayCallOutcome(
+                    requestId = requestId,
+                    upstreamHeader = upstreamHeader,
+                    replyText = replyText,
+                    error = body?.error,
+                    httpStatus = response.code()
+                ),
+                attempts = attempts
+            )
+            _uiState.value = _uiState.value.copy(routeResult = routeResult)
+
+            val content = replyText ?: routeResult.errorMessage ?: "（网关未返回有效内容）"
+            ChatMessage(role = "agent", content = content)
+        } catch (e: Exception) {
+            val hint = e.message?.take(160) ?: "未知错误"
+            _uiState.value = _uiState.value.copy(
+                routeResult = RouteResult(success = false, errorMessage = "网络错误：$hint"),
+                error = "网关调用失败：$hint"
+            )
+            ChatMessage(
+                role = "agent",
+                content = "网关调用失败，已提供本地参考回复：\n${
+                    generateLocalReply(conversation.last().content, _uiState.value).content
+                }"
+            )
+        }
+    }
+
+    private fun priceLines(state: AgentUiState): String =
+        state.models.take(8).joinToString("\n") {
             "- ${it.name}: 输入 ${it.inputPricePerMillionTokens ?: "-"} ${it.currency}," +
                 " 输出 ${it.outputPricePerMillionTokens ?: "-"} ${it.currency} / 100万 tokens;" +
                 " 更新 ${it.updatedAt ?: "未知"}; 来源 ${it.priceSourceUrl ?: "未提供"}"
         }
-        val channels = state.providers.flatMap { it.channels }.take(8).joinToString("\n") {
+
+    private fun channelLines(state: AgentUiState): String =
+        state.providers.flatMap { it.channels }.take(8).joinToString("\n") {
             "- ${it.name}: ${it.link}"
         }
-        val news = state.news.take(5).joinToString("\n") {
-            "- [${it.type}] ${it.title}"
-        }
-        return """
+
+    private fun newsLines(state: AgentUiState): String =
+        state.news.take(5).joinToString("\n") { "- [${it.type}] ${it.title}" }
+
+    private fun buildSystemPrompt(provider: ModelProvider, state: AgentUiState): String =
+        """
             你是 AI 大模型价格与渠道助手。当前用户使用 ${provider.name} (${provider.chatModel})。
             根据下方数据回答价格、渠道和优惠问题。所有价格统一为每 100 万 tokens。
             数据可能变化，回答时必须说明更新时间，并建议用户在来源页确认最终价格。
             如果当前是参考数据，不得声称它是实时数据。
 
             【模型价格】
-            $prices
+            ${priceLines(state)}
 
             【官方渠道】
-            $channels
+            ${channelLines(state)}
 
             【通知】
-            $news
+            ${newsLines(state)}
         """.trimIndent()
-    }
+
+    private fun buildGroupSystemPrompt(group: ChatGroup, state: AgentUiState): String =
+        """
+            你是 AI 大模型价格与渠道助手。当前消息经聚合网关自动路由，
+            分组：${group.name}（routeKey=${group.routeKey}）。
+            根据下方数据回答价格、渠道和优惠问题。所有价格统一为每 100 万 tokens。
+            数据可能变化，回答时必须说明更新时间，并建议用户在来源页确认最终价格。
+            如果当前是参考数据，不得声称它是实时数据。
+
+            【模型价格】
+            ${priceLines(state)}
+
+            【官方渠道】
+            ${channelLines(state)}
+
+            【通知】
+            ${newsLines(state)}
+        """.trimIndent()
 
     private fun generateLocalReply(input: String, state: AgentUiState): ChatMessage {
         val lower = input.lowercase()
@@ -557,6 +660,11 @@ enum class DataMode(val displayName: String) {
     REFERENCE("内置参考数据")
 }
 
+enum class RouteMode(val displayName: String) {
+    DIRECT("直连"),
+    GATEWAY("分组路由")
+}
+
 data class AgentUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
@@ -569,7 +677,12 @@ data class AgentUiState(
     val isNewsLoading: Boolean = false,
     val lastNewsRefreshAt: Long? = null,
     val dataMode: DataMode = DataMode.REFERENCE,
-    val dataMessage: String = "正在确认数据来源…"
+    val dataMessage: String = "正在确认数据来源…",
+    // 网关路由相关（E-03）
+    val routeMode: RouteMode = RouteMode.DIRECT,
+    val groups: List<ChatGroup> = emptyList(),
+    val selectedGroup: ChatGroup? = null,
+    val routeResult: RouteResult? = null
 )
 
 data class ChatMessage(

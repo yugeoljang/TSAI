@@ -1,9 +1,11 @@
 package com.example.myapplication.data.remote
 
 import com.example.myapplication.data.model.Channel
+import com.example.myapplication.data.model.ChatGroup
 import com.example.myapplication.data.model.LlmModel
 import com.example.myapplication.data.model.ModelProvider
 import com.example.myapplication.data.model.PriceNews
+import com.example.myapplication.data.model.RouteAttempt
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -29,4 +31,12 @@ interface ApiService {
         @Query("providerId") providerId: String? = null,
         @Query("type") type: String? = null
     ): List<PriceNews>
+
+    @GET("api/admin/groups")
+    suspend fun getGroups(): List<ChatGroup>
+
+    @GET("api/admin/requests/{requestId}/attempts")
+    suspend fun getRouteAttempts(
+        @Path("requestId") requestId: String
+    ): List<RouteAttempt>
 }

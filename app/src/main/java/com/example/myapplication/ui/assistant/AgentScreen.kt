@@ -1,7 +1,12 @@
 package com.example.myapplication.ui.assistant
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,12 +17,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -28,6 +35,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -62,6 +70,7 @@ import com.example.myapplication.data.local.validateApiConfig
 import com.example.myapplication.data.model.Channel
 import com.example.myapplication.data.model.LlmModel
 import com.example.myapplication.data.model.ModelProvider
+import com.example.myapplication.data.model.RouteResult
 import java.text.DecimalFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -204,6 +213,7 @@ private fun ErrorBanner(message: String, onOpenSettings: () -> Unit) {
 @Composable
 private fun AssistantTab(uiState: AgentUiState, viewModel: AgentViewModel) {
     var input by remember { mutableStateOf("") }
+    val context = LocalContext.current
     Column(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -211,45 +221,116 @@ private fun AssistantTab(uiState: AgentUiState, viewModel: AgentViewModel) {
                 .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("对话平台：", style = MaterialTheme.typography.bodyMedium)
-                var expanded by remember { mutableStateOf(false) }
-                Box {
-                    OutlinedButton(onClick = { expanded = true }) {
-                        Text(uiState.activeProvider?.name ?: "未选择")
-                    }
-                    DropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
-                    ) {
-                        uiState.providers.forEach { provider ->
-                            val configured = provider.hasCompleteApiConfig()
-                            DropdownMenuItem(
-                                text = {
-                                    Text("${provider.name}${if (configured) " ✓" else ""}")
-                                },
-                                onClick = {
-                                    viewModel.setActiveProvider(provider)
-                                    expanded = false
+                Text("路由方式：", style = MaterialTheme.typography.bodyMedium)
+                FilterChip(
+                    selected = uiState.routeMode == RouteMode.DIRECT,
+                    onClick = { viewModel.setRouteMode(RouteMode.DIRECT) },
+                    label = { Text(RouteMode.DIRECT.displayName) }
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                FilterChip(
+                    selected = uiState.routeMode == RouteMode.GATEWAY,
+                    onClick = { viewModel.setRouteMode(RouteMode.GATEWAY) },
+                    label = { Text(RouteMode.GATEWAY.displayName) }
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+
+            when (uiState.routeMode) {
+                RouteMode.DIRECT -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("对话平台：", style = MaterialTheme.typography.bodyMedium)
+                        var expanded by remember { mutableStateOf(false) }
+                        Box {
+                            OutlinedButton(onClick = { expanded = true }) {
+                                Text(uiState.activeProvider?.name ?: "未选择")
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false }
+                            ) {
+                                uiState.providers.forEach { provider ->
+                                    val configured = provider.hasCompleteApiConfig()
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text("${provider.name}${if (configured) " ✓" else ""}")
+                                        },
+                                        onClick = {
+                                            viewModel.setActiveProvider(provider)
+                                            expanded = false
+                                        }
+                                    )
                                 }
-                            )
+                            }
                         }
+                    }
+                    val realApi = uiState.activeProvider?.hasCompleteApiConfig() == true
+                    Text(
+                        text = if (realApi) {
+                            "真实 API 已配置；将携带最近 12 条消息作为上下文。"
+                        } else {
+                            "未完成 API 配置；当前使用本地参考回复。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (realApi) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.outline
+                        }
+                    )
+                }
+
+                RouteMode.GATEWAY -> {
+                    if (uiState.groups.isEmpty()) {
+                        Text(
+                            "未发现可用分组。请先在服务端运行 setup_demo_group.py，再点右上角刷新。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("API 分组：", style = MaterialTheme.typography.bodyMedium)
+                            var expanded by remember { mutableStateOf(false) }
+                            Box {
+                                OutlinedButton(onClick = { expanded = true }) {
+                                    Text(
+                                        uiState.selectedGroup?.let { "${it.routeKey} · ${it.name}" }
+                                            ?: "选择分组"
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false }
+                                ) {
+                                    uiState.groups.forEach { group ->
+                                        DropdownMenuItem(
+                                            text = { Text("${group.routeKey} · ${group.name}") },
+                                            onClick = {
+                                                viewModel.setSelectedGroup(group)
+                                                expanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        val hasGroup = uiState.selectedGroup != null
+                        Text(
+                            text = if (hasGroup) {
+                                "消息经聚合网关自动路由；上游故障时自动切换。"
+                            } else {
+                                "请选择分组后发送消息。"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (hasGroup) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outline
+                            }
+                        )
                     }
                 }
             }
-            val realApi = uiState.activeProvider?.hasCompleteApiConfig() == true
-            Text(
-                text = if (realApi) {
-                    "真实 API 已配置；将携带最近 12 条消息作为上下文。"
-                } else {
-                    "未完成 API 配置；当前使用本地参考回复。"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (realApi) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.outline
-                }
-            )
         }
 
         if (uiState.isLoading) {
@@ -280,6 +361,23 @@ private fun AssistantTab(uiState: AgentUiState, viewModel: AgentViewModel) {
                 contentPadding = PaddingValues(12.dp),
                 reverseLayout = true
             ) {
+                if (uiState.routeResult != null) {
+                    item {
+                        RouteResultCard(
+                            result = uiState.routeResult,
+                            onCopyRequestId = { id ->
+                                val clipboard = context.getSystemService(
+                                    Context.CLIPBOARD_SERVICE
+                                ) as ClipboardManager
+                                clipboard.setPrimaryClip(
+                                    ClipData.newPlainText("gateway_request_id", id)
+                                )
+                                Toast.makeText(context, "已复制请求 ID", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
                 if (uiState.isAgentThinking) {
                     item {
                         Text(
@@ -354,6 +452,92 @@ private fun ChatBubble(message: ChatMessage) {
             )
         }
     }
+}
+
+@Composable
+private fun RouteResultCard(
+    result: RouteResult,
+    onCopyRequestId: (String) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (result.success) {
+                MaterialTheme.colorScheme.surfaceVariant
+            } else {
+                MaterialTheme.colorScheme.errorContainer
+            }
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "路由结果",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                RouteBadge(
+                    text = when {
+                        result.switched -> "已切换"
+                        result.success -> "直连命中"
+                        else -> "失败"
+                    },
+                    color = when {
+                        result.switched -> MaterialTheme.colorScheme.tertiary
+                        result.success -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.error
+                    }
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            if (result.success) {
+                result.finalUpstream?.let {
+                    Text("最终上游：$it", style = MaterialTheme.typography.bodyMedium)
+                }
+                Text(
+                    "尝试次数：${if (result.attemptCount > 0) result.attemptCount else "未知"}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            result.requestId?.let { id ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "请求 ID：$id",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { onCopyRequestId(id) }) {
+                        Icon(
+                            Icons.Default.ContentCopy,
+                            contentDescription = "复制请求 ID",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+            result.errorMessage?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RouteBadge(text: String, color: androidx.compose.ui.graphics.Color) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .background(color.copy(alpha = 0.18f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    )
 }
 
 @Composable

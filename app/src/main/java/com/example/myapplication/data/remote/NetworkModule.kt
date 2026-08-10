@@ -44,6 +44,15 @@ object NetworkModule {
                     .create(ApiService::class.java)
             }
     }
+
+    /** 聚合网关聊天服务：baseUrl = 聚合根地址 + "v1/"。 */
+    val gatewayChatService: GatewayChatService? by lazy {
+        BuildConfig.AGGREGATOR_BASE_URL.trim()
+            .takeIf { it.isNotEmpty() }
+            ?.let { baseUrl ->
+                createGatewayChatService("${baseUrl.ensureTrailingSlash()}v1/")
+            }
+    }
 }
 
 private fun String.ensureTrailingSlash(): String =
