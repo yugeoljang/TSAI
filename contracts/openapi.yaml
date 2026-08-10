@@ -1,0 +1,1276 @@
+openapi: 3.0.3
+info:
+  title: Personal Gateway Plus API
+  version: 0.1.0
+  description: |
+    Personal Gateway Plus 一周可用初版接口契约（P0）。
+
+    设计要点：
+    - 对外中转入口 `POST /v1/chat/completions` 保持 OpenAI Chat Completions 兼容，
+      `model` 字段填分组 routeKey；仅支持非流式（stream=false）。
+    - 成功响应通过响应头 `X-Request-Id`、`X-Upstream` 返回请求 ID 和最终上游名称。
+    - 管理接口统一前缀 `/api/admin`；Android 兼容查询接口无前缀（字段名与现有客户端一致）。
+    - API Key 永不出现在响应、日志或错误中，仅返回后四位 `apiKeyLastFour`。
+    - 所有错误使用统一格式 `ErrorEnvelope`。
+  contact:
+    name: TSAI Team
+
+servers:
+  - url: http://127.0.0.1:8000
+    description: 本地开发
+
+# ============================================================
+# 全局安全：管理接口暂用简单令牌（初版单用户），中转入口无需鉴权。
+# ============================================================
+tags:
+  - name: gateway
+    description: OpenAI 兼容中转入口
+  - name: providers
+    description: 供应商与上游 API 管理
+  - name: groups
+    description: API 分组与成员排序
+  - name: catalog
+    description: 模型、价格、活动查询
+  - name: requests
+    description: 路由记录与尝试链
+  - name: android-compat
+    description: Android 现有客户端兼容查询接口
+  - name: system
+    description: 健康检查与系统
+
+paths:
+  # ------------------------------------------------------------
+  # 对外中转入口
+  # ------------------------------------------------------------
+  /v1/chat/completions:
+    post:
+      tags: [gateway]
+      summary: OpenAI 兼容 Chat Completions（非流式分组路由）
+      description: |
+        请求保持 OpenAI Chat Completions 格式，`model` 填分组 routeKey。
+        初版只接受 stream=false；收到 stream=true 返回 400 不支持错误。
+        按分组成员优先级顺序尝试，遇到连接失败/超时/429/5xx 自动切换到下一上游；
+        400/422 参数错误不切换，直接返回。
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdIn'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: 成功，保持 OpenAI 兼容结构
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Upstream:
+              $ref: '#/components/headers/XUpstream'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  # ------------------------------------------------------------
+  # 供应商
+  # ------------------------------------------------------------
+  /api/admin/providers:
+    get:
+      tags: [providers]
+      summary: 供应商列表
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Provider'
+    post:
+      tags: [providers]
+      summary: 新增供应商
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderCreate'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Provider'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/admin/providers/{providerId}:
+    parameters:
+      - $ref: '#/components/parameters/ProviderId'
+    get:
+      tags: [providers]
+      summary: 供应商详情
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Provider'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [providers]
+      summary: 编辑供应商
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderUpdate'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Provider'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [providers]
+      summary: 删除供应商
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ------------------------------------------------------------
+  # 上游 API
+  # ------------------------------------------------------------
+  /api/admin/upstreams:
+    get:
+      tags: [providers]
+      summary: 上游 API 列表（API Key 脱敏）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UpstreamEndpoint'
+    post:
+      tags: [providers]
+      summary: 新增上游 API（API Key 加密保存）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpstreamCreate'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamEndpoint'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/admin/upstreams/{upstreamId}:
+    parameters:
+      - $ref: '#/components/parameters/UpstreamId'
+    get:
+      tags: [providers]
+      summary: 上游详情（不含明文 Key）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamEndpoint'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [providers]
+      summary: 编辑上游（传 apiKey 时更新，否则保持）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpstreamUpdate'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamEndpoint'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [providers]
+      summary: 删除上游
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ------------------------------------------------------------
+  # API 分组与成员
+  # ------------------------------------------------------------
+  /api/admin/groups:
+    get:
+      tags: [groups]
+      summary: API 分组列表
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiGroup'
+    post:
+      tags: [groups]
+      summary: 创建分组（routeKey 全局唯一）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiGroupCreate'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiGroup'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/admin/groups/{groupId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [groups]
+      summary: 分组详情（含成员列表）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiGroupDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [groups]
+      summary: 编辑分组
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiGroupUpdate'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiGroup'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [groups]
+      summary: 删除分组
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/admin/groups/{groupId}/members:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    post:
+      tags: [groups]
+      summary: 添加分组成员
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiGroupMemberCreate'
+      responses:
+        '201':
+          description: 添加成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiGroupMember'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/admin/groups/{groupId}/members/order:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    put:
+      tags: [groups]
+      summary: 批量调整成员优先级（上移/下移）
+      description: 单个事务内更新 priorityRank，保证顺序一致。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReorderRequest'
+      responses:
+        '200':
+          description: 成功，返回排序后的成员列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiGroupMember'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/admin/groups/{groupId}/members/{memberId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/MemberId'
+    patch:
+      tags: [groups]
+      summary: 编辑成员（启停、上游模型名、优先级）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiGroupMemberUpdate'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiGroupMember'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [groups]
+      summary: 移除成员
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ------------------------------------------------------------
+  # 模型 / 价格 / 活动
+  # ------------------------------------------------------------
+  /api/admin/models:
+    get:
+      tags: [catalog]
+      summary: 模型目录列表
+      parameters:
+        - name: providerId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelCatalogEntry'
+
+  /api/admin/prices:
+    get:
+      tags: [catalog]
+      summary: 价格快照列表（含来源与更新时间）
+      parameters:
+        - name: providerId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PriceSnapshot'
+
+  /api/admin/promotions:
+    get:
+      tags: [catalog]
+      summary: 活动列表（区分有效/过期）
+      parameters:
+        - name: providerId
+          in: query
+          schema:
+            type: string
+        - name: activeOnly
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Promotion'
+
+  # ------------------------------------------------------------
+  # 路由记录
+  # ------------------------------------------------------------
+  /api/admin/requests:
+    get:
+      tags: [requests]
+      summary: 最近网关请求列表
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GatewayRequest'
+
+  /api/admin/requests/{requestId}/attempts:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    get:
+      tags: [requests]
+      summary: 单次请求的路由尝试链
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RouteAttempt'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ------------------------------------------------------------
+  # Android 兼容查询接口（无前缀，字段名与现有 ApiService 一致）
+  # ------------------------------------------------------------
+  /providers:
+    get:
+      tags: [android-compat]
+      summary: Android 兼容 - 供应商列表
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AndroidProvider'
+
+  /providers/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [android-compat]
+      summary: Android 兼容 - 供应商详情
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AndroidProvider'
+
+  /providers/{id}/channels:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [android-compat]
+      summary: Android 兼容 - 供应商渠道
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AndroidChannel'
+
+  /models:
+    get:
+      tags: [android-compat]
+      summary: Android 兼容 - 模型价格（字段与 LlmModel 一致）
+      parameters:
+        - name: providerId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AndroidLlmModel'
+
+  /news:
+    get:
+      tags: [android-compat]
+      summary: Android 兼容 - 价格与优惠通知（字段与 PriceNews 一致）
+      parameters:
+        - name: providerId
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AndroidPriceNews'
+
+  # ------------------------------------------------------------
+  # 系统
+  # ------------------------------------------------------------
+  /health:
+    get:
+      tags: [system]
+      summary: 健康检查
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+# ============================================================
+# Components
+# ============================================================
+components:
+  parameters:
+    ProviderId:
+      name: providerId
+      in: path
+      required: true
+      schema:
+        type: string
+    UpstreamId:
+      name: upstreamId
+      in: path
+      required: true
+      schema:
+        type: string
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema:
+        type: string
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      schema:
+        type: string
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: string
+    XRequestIdIn:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: 客户端可选传入请求 ID，否则服务端生成。
+
+  headers:
+    XRequestId:
+      description: 本次请求的唯一 ID
+      schema:
+        type: string
+    XUpstream:
+      description: 最终使用的上游显示名称
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: 请求参数错误（不切换上游）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ValidationError:
+      description: 字段校验失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: 唯一约束冲突（如 routeKey 重复）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    BadGateway:
+      description: 所有上游均失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    GatewayTimeout:
+      description: 整次请求总超时
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    # ---------- 统一错误 ----------
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, type, message]
+          properties:
+            code:
+              type: integer
+              description: HTTP 状态码
+            type:
+              type: string
+              description: 错误类别枚举
+              enum:
+                - validation_error
+                - not_found
+                - conflict
+                - upstream_error
+                - all_upstreams_failed
+                - request_timeout
+                - stream_not_supported
+                - internal_error
+            message:
+              type: string
+            requestId:
+              type: string
+              description: 关联请求 ID
+            details:
+              type: array
+              items:
+                type: object
+
+    # ---------- 供应商 ----------
+    Provider:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        protocolType:
+          type: string
+          enum: [OPENAI_COMPATIBLE]
+          default: OPENAI_COMPATIBLE
+        officialUrl:
+          type: string
+        pricingUrl:
+          type: string
+        enabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ProviderCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        officialUrl:
+          type: string
+        pricingUrl:
+          type: string
+        enabled:
+          type: boolean
+          default: true
+    ProviderUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        officialUrl:
+          type: string
+        pricingUrl:
+          type: string
+        enabled:
+          type: boolean
+
+    # ---------- 上游 API ----------
+    UpstreamEndpoint:
+      type: object
+      description: 查询响应；不含明文 apiKey，仅返回 apiKeyLastFour。
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        displayName:
+          type: string
+        baseUrl:
+          type: string
+        apiKeyLastFour:
+          type: string
+          description: 明文 Key 永不返回，仅返回后四位用于核对
+        defaultModel:
+          type: string
+        enabled:
+          type: boolean
+        timeoutMs:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    UpstreamCreate:
+      type: object
+      required: [providerId, displayName, baseUrl, apiKey]
+      properties:
+        providerId:
+          type: string
+        displayName:
+          type: string
+        baseUrl:
+          type: string
+          description: 必须 HTTPS（localhost 演示除外）
+        apiKey:
+          type: string
+          description: 写入时加密保存，永不回显
+        defaultModel:
+          type: string
+        enabled:
+          type: boolean
+          default: true
+        timeoutMs:
+          type: integer
+          default: 15000
+    UpstreamUpdate:
+      type: object
+      properties:
+        displayName:
+          type: string
+        baseUrl:
+          type: string
+        apiKey:
+          type: string
+          description: 可选；不传则保持原 Key
+        defaultModel:
+          type: string
+        enabled:
+          type: boolean
+        timeoutMs:
+          type: integer
+
+    # ---------- 模型 / 价格 / 活动 ----------
+    ModelCatalogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        upstreamModelId:
+          type: string
+        displayName:
+          type: string
+        contextWindow:
+          type: integer
+        enabled:
+          type: boolean
+        sourceUrl:
+          type: string
+        verifiedAt:
+          type: string
+          format: date
+    PriceSnapshot:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        modelCatalogEntryId:
+          type: string
+        currency:
+          type: string
+          default: CNY
+        inputPricePerMillionTokens:
+          type: number
+        outputPricePerMillionTokens:
+          type: number
+        sourceUrl:
+          type: string
+        effectiveFrom:
+          type: string
+          format: date
+        verifiedAt:
+          type: string
+          format: date
+    Promotion:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+          enum: [discount, credit, price_change]
+        description:
+          type: string
+        sourceUrl:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        active:
+          type: boolean
+          description: 当前是否在有效期内
+        verifiedAt:
+          type: string
+          format: date
+
+    # ---------- API 分组 ----------
+    ApiGroup:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        routeKey:
+          type: string
+          description: 用于调用的唯一标识，填入 model 字段
+        routingPolicy:
+          type: string
+          enum: [ORDERED_FAILOVER]
+          default: ORDERED_FAILOVER
+        maxAttempts:
+          type: integer
+          default: 3
+        enabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ApiGroupDetail:
+      allOf:
+        - $ref: '#/components/schemas/ApiGroup'
+        - type: object
+          properties:
+            members:
+              type: array
+              items:
+                $ref: '#/components/schemas/ApiGroupMember'
+    ApiGroupCreate:
+      type: object
+      required: [name, routeKey]
+      properties:
+        name:
+          type: string
+        routeKey:
+          type: string
+        maxAttempts:
+          type: integer
+          default: 3
+        enabled:
+          type: boolean
+          default: true
+    ApiGroupUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        maxAttempts:
+          type: integer
+        enabled:
+          type: boolean
+
+    ApiGroupMember:
+      type: object
+      properties:
+        id:
+          type: string
+        groupId:
+          type: string
+        upstreamEndpointId:
+          type: string
+        upstreamDisplayName:
+          type: string
+          description: 便于展示，后端联表返回
+        upstreamModelName:
+          type: string
+          description: 该成员映射到的真实上游模型名
+        priorityRank:
+          type: integer
+          description: 数值越小越优先
+        enabled:
+          type: boolean
+    ApiGroupMemberCreate:
+      type: object
+      required: [upstreamEndpointId, upstreamModelName]
+      properties:
+        upstreamEndpointId:
+          type: string
+        upstreamModelName:
+          type: string
+        priorityRank:
+          type: integer
+          description: 不传则追加到末尾
+        enabled:
+          type: boolean
+          default: true
+    ApiGroupMemberUpdate:
+      type: object
+      properties:
+        upstreamModelName:
+          type: string
+        priorityRank:
+          type: integer
+        enabled:
+          type: boolean
+    ReorderRequest:
+      type: object
+      required: [orderedMemberIds]
+      properties:
+        orderedMemberIds:
+          type: array
+          items:
+            type: string
+          description: 按目标顺序排列的成员 ID 列表
+
+    # ---------- 路由记录 ----------
+    GatewayRequest:
+      type: object
+      properties:
+        requestId:
+          type: string
+        routeKey:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        finalStatus:
+          type: string
+          enum: [success, all_failed, client_error, timeout]
+        finalUpstreamDisplayName:
+          type: string
+          nullable: true
+        attemptCount:
+          type: integer
+    RouteAttempt:
+      type: object
+      properties:
+        requestId:
+          type: string
+        attemptIndex:
+          type: integer
+        upstreamEndpointId:
+          type: string
+        upstreamDisplayName:
+          type: string
+        upstreamModelName:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        resultCategory:
+          type: string
+          enum: [success, network_error, timeout, rate_limited, server_error, auth_error, client_error]
+        upstreamStatusCode:
+          type: integer
+          nullable: true
+        durationMs:
+          type: integer
+        sanitizedError:
+          type: string
+          nullable: true
+        retryable:
+          type: boolean
+
+    # ---------- 网关请求/响应（OpenAI 兼容）----------
+    ChatCompletionRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model:
+          type: string
+          description: 分组 routeKey
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        temperature:
+          type: number
+          default: 0.7
+        max_tokens:
+          type: integer
+          default: 1024
+        stream:
+          type: boolean
+          default: false
+          description: 初版仅支持 false；true 返回 400
+    ChatMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant]
+        content:
+          type: string
+    ChatCompletionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          default: chat.completion
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              message:
+                $ref: '#/components/schemas/ChatMessage'
+              finish_reason:
+                type: string
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+
+    # ---------- Android 兼容 DTO（字段名严格对齐现有 Kotlin 类）----------
+    AndroidProvider:
+      type: object
+      description: 对齐 ModelProvider.kt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        logoUrl:
+          type: string
+          nullable: true
+        websiteUrl:
+          type: string
+        region:
+          type: string
+          default: global
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/AndroidChannel'
+        apiBaseUrl:
+          type: string
+          nullable: true
+        apiKey:
+          type: string
+          nullable: true
+          description: 后端永不返回真实 Key，恒为 null
+        chatModel:
+          type: string
+          nullable: true
+        supportsOpenAiChat:
+          type: boolean
+          default: false
+    AndroidChannel:
+      type: object
+      description: 对齐 Channel.kt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        link:
+          type: string
+        description:
+          type: string
+          nullable: true
+    AndroidLlmModel:
+      type: object
+      description: 对齐 LlmModel.kt
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        name:
+          type: string
+        contextWindow:
+          type: integer
+          nullable: true
+        inputPricePerMillionTokens:
+          type: number
+          nullable: true
+        outputPricePerMillionTokens:
+          type: number
+          nullable: true
+        currency:
+          type: string
+          default: USD
+        tier:
+          type: string
+          default: standard
+        priceSourceUrl:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          nullable: true
+        priceNote:
+          type: string
+          nullable: true
+    AndroidPriceNews:
+      type: object
+      description: 对齐 PriceNews.kt
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        title:
+          type: string
+        summary:
+          type: string
+          nullable: true
+        type:
+          type: string
+        link:
+          type: string
+          nullable: true
+        validFrom:
+          type: string
+          nullable: true
+        validUntil:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+
+    # ---------- 系统 ----------
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        database:
+          type: string
+          enum: [ok, error]
+        version:
+          type: string
