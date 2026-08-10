@@ -44,6 +44,10 @@ class Settings:
     # --- CORS ---
     cors_origins: str = os.getenv("CORS_ORIGINS", "*")
 
+    def __init__(self) -> None:
+        self._ephemeral_master_key: bytes | None = None
+        self._master_key_warning_printed = False
+
     # --- 派生属性 ---
     @property
     def db_file(self) -> Path:
@@ -59,17 +63,17 @@ class Settings:
                     return key
             except ValueError:
                 pass
+        if self._ephemeral_master_key is None:
+            self._ephemeral_master_key = secrets.token_bytes(32)
+        if not self._master_key_warning_printed:
+            reason = "格式无效" if self.master_key_hex else "未配置"
             print(
-                "[警告] GATEWAY_MASTER_KEY 格式无效（需要 64 位十六进制），"
-                "改用临时随机密钥。重启后已加密的 API Key 将无法解密！",
+                f"[警告] GATEWAY_MASTER_KEY {reason}，使用本进程固定的临时密钥。"
+                "重启后已加密的 API Key 将无法解密，仅供本地调试！",
                 file=sys.stderr,
             )
-        print(
-            "[警告] 未配置 GATEWAY_MASTER_KEY，使用临时随机密钥。"
-            "重启后已加密的 API Key 将无法解密，仅供本地调试！",
-            file=sys.stderr,
-        )
-        return secrets.token_bytes(32)
+            self._master_key_warning_printed = True
+        return self._ephemeral_master_key
 
     @property
     def cors_origin_list(self) -> list[str]:

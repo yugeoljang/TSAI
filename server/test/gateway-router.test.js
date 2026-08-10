@@ -22,7 +22,7 @@ test("first upstream succeeds without calling the backup", async () => {
 
   assert.equal(result.statusCode, 200);
   assert.equal(result.body.choices[0].message.content, "primary");
-  assert.equal(result.headers["x-gateway-upstream"], "upstream-1");
+  assert.equal(result.headers["x-upstream"], "upstream-1");
   assert.equal(primary.hits, 1);
   assert.equal(backup.hits, 0);
   assert.equal((await fixture.attempts.list()).length, 1);
@@ -38,7 +38,7 @@ test("500 retries the next upstream in priority order", async () => {
 
   assert.equal(result.statusCode, 200);
   assert.equal(result.body.choices[0].message.content, "backup");
-  assert.equal(result.headers["x-gateway-upstream"], "upstream-2");
+  assert.equal(result.headers["x-upstream"], "upstream-2");
   assert.equal(primary.hits, 1);
   assert.equal(backup.hits, 1);
   assert.deepEqual(attempts.map((item) => item.errorCategory).reverse(), ["HTTP_500", null]);

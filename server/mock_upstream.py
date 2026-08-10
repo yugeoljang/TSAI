@@ -5,7 +5,7 @@
 
 五种可控场景（对应 B 的验收要求）：
     normal  正常回答（200 + 标准 OpenAI Chat Completion JSON）
-    timeout 故意延迟默认 3 秒再返回（用于触发网关超时切换）
+    timeout 延迟默认 3 秒后返回 HTTP 408（用于稳定触发网关超时切换）
     429     限流（HTTP 429 + OpenAI 风格错误）
     500     服务器故障（HTTP 500 + OpenAI 风格错误）
     400     参数错误（HTTP 400 + OpenAI 风格错误，验证"不切换"）
@@ -219,9 +219,14 @@ class MockHandler(BaseHTTPRequestHandler):
         headers = {"X-Request-Id": request_id} if request_id else {}
 
         if scenario == "timeout":
-            # 故意延迟超过网关超时上限再返回，触发切换；时长可配。
+            # 延迟后明确返回 408，既保留“慢上游”效果，也不依赖网关默认
+            # timeoutMs，保证演示在约 3 秒内稳定切换。
             time.sleep(_current_state()["timeout_seconds"])
-            return self._send(200, _ok_payload(body), headers)
+            return self._send(
+                408,
+                _openai_error("request_timeout", "Upstream request timed out (simulated)."),
+                headers,
+            )
 
         if scenario == "429":
             headers["Retry-After"] = "60"
@@ -457,12 +462,12 @@ def _selftest() -> int:
         etype = (body or {}).get("error", {}).get("type") if body else None
         results.append(("400", status == 400, f"status={status}, type={etype}"))
 
-        # 5. 超时：先把超时秒数调成 1 秒，验证确实"卡住 1 秒后返回"
+        # 5. 超时：先把延迟调成 1 秒，验证卡住后返回 408
         _http_post(f"{base}/_mock/scenario", {"scenario": "normal", "timeout_seconds": 1})
         status, _, elapsed = _http_post(f"{base}/v1/chat/completions?scenario=timeout", timeout=30)
         results.append(
-            ("timeout", status == 200 and elapsed >= 1.0,
-             f"status={status}, 耗时={elapsed:.2f}s（≥1s 即说明真的卡住了）")
+            ("timeout", status == 408 and elapsed >= 1.0,
+             f"status={status}, 耗时={elapsed:.2f}s（应为 408 且 ≥1s）")
         )
         # 恢复正常
         _http_post(f"{base}/_mock/scenario", {"scenario": "normal", "timeout_seconds": DEFAULT_TIMEOUT_SECONDS})

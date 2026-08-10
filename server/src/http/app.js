@@ -18,9 +18,10 @@ export function createGatewayHttpServer({ router, attemptRepository }) {
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/gateway/route-attempts") {
+    const attemptMatch = url.pathname.match(/^\/api\/admin\/requests\/([^/]+)\/attempts$/);
+    if (request.method === "GET" && (url.pathname === "/gateway/route-attempts" || attemptMatch)) {
       const attempts = await attemptRepository.list({
-        requestId: url.searchParams.get("requestId") || undefined,
+        requestId: attemptMatch?.[1] || url.searchParams.get("requestId") || undefined,
         limit: Number(url.searchParams.get("limit") || 20),
       });
       sendJson(response, 200, { items: attempts });
@@ -73,7 +74,7 @@ function setCorsHeaders(response) {
   response.setHeader("access-control-allow-origin", "http://localhost:5173");
   response.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
   response.setHeader("access-control-allow-headers", "content-type,authorization,x-request-id");
-  response.setHeader("access-control-expose-headers", "x-request-id,x-gateway-upstream");
+  response.setHeader("access-control-expose-headers", "x-request-id,x-upstream");
 }
 
 function sendJson(response, statusCode, body) {

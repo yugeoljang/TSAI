@@ -70,7 +70,7 @@ def run(page):
         dlg.get_by_role("button", name="保存").click()
         page.wait_for_timeout(700)
 
-    add_upstream("模拟上游-可控故障", "http://127.0.0.1:9001", "sk-mock-1111", "mock-model")
+    add_upstream("模拟上游-可控故障", "http://127.0.0.1:8100", "sk-mock-1111", "mock-model")
     add_upstream("DeepSeek-真实", "https://api.deepseek.com", "sk-real-9999", "deepseek-chat")
 
     up_table = page.locator(".el-card", has_text="上游 API").locator(".el-table__row")

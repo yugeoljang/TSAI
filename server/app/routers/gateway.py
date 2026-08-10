@@ -1,4 +1,4 @@
-"""OpenAI 兼容中转入口（骨架）。
+"""OpenAI 兼容中转入口。
 
 POST /v1/chat/completions
 - model 字段填分组 routeKey
@@ -6,16 +6,16 @@ POST /v1/chat/completions
 - 按分组成员优先级顺序尝试上游：连接失败/超时/429/5xx 切换，400/422 不切换
 - 成功响应头返回 X-Upstream（最终上游名称）
 
-🚧 路由转发逻辑由 B 类任务实现。本骨架注册端点并校验 stream=false，
-   返回 501 占位以便联调，B 任务填充 httpx 调用与故障切换。
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from ..database import get_db
 from ..errors import StreamNotSupportedError
 from ..schemas import ChatCompletionRequest
+from ..services.gateway_service import create_gateway_request, route_chat_completion, utc_now
 
 router = APIRouter(tags=["gateway"])
 
@@ -29,25 +29,22 @@ async def chat_completions(
     if body.stream:
         raise StreamNotSupportedError()
 
-    # 🚧 B 任务：实现分组路由 + httpx 上游转发 + 故障切换
-    # 流程：
-    #   1. 按 body.model(routeKey) 查 api_group 及启用成员（priority_rank 升序）
-    #   2. 逐个尝试上游：解密 apiKey -> POST {baseUrl}/v1/chat/completions
-    #      - 连接失败/超时/429/5xx -> 记录 route_attempt，切换下一上游
-    #      - 400/422 -> 不切换，直接返回（client_error）
-    #      - 200 -> 记录 success，透传响应
-    #   3. 全部失败 -> 抛 AllUpstreamsFailedError
-    #   4. 响应头 X-Upstream 返回最终上游 displayName
-    #   5. gateway_request + route_attempt 写库（供 requests 端点查询）
+    request_id = getattr(request.state, "request_id")
+    db = await get_db()
+    request_id = await create_gateway_request(db, request_id, body.model, utc_now())
+    request.state.request_id = request_id
+    result = await route_chat_completion(
+        db,
+        request_id=request_id,
+        route_key=body.model,
+        payload=body.model_dump(),
+    )
+
+    headers = {"X-Request-Id": request_id}
+    if result.upstream_name:
+        headers["X-Upstream"] = result.upstream_name
     return JSONResponse(
-        status_code=501,
-        content={
-            "error": {
-                "code": 501,
-                "type": "internal_error",
-                "message": "中转路由逻辑尚未实现（B 类任务），骨架已就绪",
-                "requestId": getattr(request.state, "request_id", None),
-            }
-        },
-        headers={"X-Request-Id": getattr(request.state, "request_id", "")},
+        status_code=result.status_code,
+        content=result.body,
+        headers=headers,
     )

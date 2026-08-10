@@ -39,6 +39,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         )
 
         response: Response = await call_next(request)
-        response.headers["X-Request-Id"] = request_id
-        logger.info("req_end id=%s status=%s", request_id, response.status_code)
+        response_request_id = getattr(request.state, "request_id", request_id)
+        response.headers["X-Request-Id"] = response_request_id
+        logger.info("req_end id=%s status=%s", response_request_id, response.status_code)
         return response

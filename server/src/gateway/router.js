@@ -302,7 +302,7 @@ function chatCompletionsUrl(baseUrl) {
 function responseHeaders(requestId, upstreamName) {
   return {
     "x-request-id": requestId,
-    "x-gateway-upstream": upstreamName,
+    "x-upstream": upstreamName,
   };
 }
 

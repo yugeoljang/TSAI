@@ -8,7 +8,7 @@ defineProps<{
 
 <template>
   <div class="source">
-    <el-link v-if="url" :href="url" target="_blank" rel="noopener noreferrer" type="primary" :underline="false">
+    <el-link v-if="url" :href="url" target="_blank" rel="noopener noreferrer" type="primary" underline="never">
       官方来源
     </el-link>
     <span v-else class="none">无来源</span>

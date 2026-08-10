@@ -76,7 +76,7 @@ class UpstreamCreate(BaseModel):
     apiKey: str = Field(description="写入时加密保存，永不回显")
     defaultModel: str | None = None
     enabled: bool = True
-    timeoutMs: int = 15000
+    timeoutMs: int = Field(default=15000, ge=100, le=120000)
 
 
 class UpstreamUpdate(BaseModel):
@@ -85,7 +85,7 @@ class UpstreamUpdate(BaseModel):
     apiKey: str | None = Field(default=None, description="可选；不传则保持原 Key")
     defaultModel: str | None = None
     enabled: bool | None = None
-    timeoutMs: int | None = None
+    timeoutMs: int | None = Field(default=None, ge=100, le=120000)
 
 
 # ============================================================
@@ -152,32 +152,32 @@ class ApiGroupMember(BaseModel):
 
 
 class ApiGroupDetail(ApiGroup):
-    members: list[ApiGroupMember] = []
+    members: list[ApiGroupMember] = Field(default_factory=list)
 
 
 class ApiGroupCreate(BaseModel):
     name: str
     routeKey: str
-    maxAttempts: int = 3
+    maxAttempts: int = Field(default=3, ge=1, le=10)
     enabled: bool = True
 
 
 class ApiGroupUpdate(BaseModel):
     name: str | None = None
-    maxAttempts: int | None = None
+    maxAttempts: int | None = Field(default=None, ge=1, le=10)
     enabled: bool | None = None
 
 
 class ApiGroupMemberCreate(BaseModel):
     upstreamEndpointId: str
     upstreamModelName: str
-    priorityRank: int | None = Field(default=None, description="不传则追加到末尾")
+    priorityRank: int | None = Field(default=None, ge=1, description="不传则追加到末尾")
     enabled: bool = True
 
 
 class ApiGroupMemberUpdate(BaseModel):
     upstreamModelName: str | None = None
-    priorityRank: int | None = None
+    priorityRank: int | None = Field(default=None, ge=1)
     enabled: bool | None = None
 
 
@@ -271,7 +271,7 @@ class AndroidProvider(BaseModel):
     logoUrl: str | None = None
     websiteUrl: str
     region: str = "global"
-    channels: list[AndroidChannel] = []
+    channels: list[AndroidChannel] = Field(default_factory=list)
     apiBaseUrl: str | None = None
     apiKey: str | None = None  # 后端永不返回真实 Key，恒为 null
     chatModel: str | None = None

@@ -1,9 +1,8 @@
 # Personal Gateway Plus - Web 管理端
 
-> 🚧 **WEEK1 MVP 占位**：本目录为 D 类任务（Web 管理页面）预留。
-> 后端 API 已就绪，前端待 D 任务实现。
+Vue 3 + TypeScript + Element Plus 管理端，默认开发地址为 `http://127.0.0.1:5173`。
 
-## 规划
+## 已实现
 
 Web 管理端用于可视化管理网关配置与查看请求记录：
 
@@ -13,13 +12,26 @@ Web 管理端用于可视化管理网关配置与查看请求记录：
 - **活动通知**：查看促销活动（`/api/admin/promotions`）
 - **请求历史**：查看网关请求与故障切换轨迹（`/api/admin/requests`）
 
+## 启动
+
+```powershell
+cd web
+npm.cmd ci
+npm.cmd run dev
+```
+
+开发服务器会把 `/api`、`/v1` 和 `/health` 转发到 `http://127.0.0.1:8000`。
+
 ## 对接后端
 
 - 后端地址：`http://127.0.0.1:8000`
 - API 文档：`http://127.0.0.1:8000/docs`
 - 接口契约：`../contracts/openapi.yaml`
-- CORS：后端默认允许全部来源（生产环境需收紧）
+- 右上角 Mock 开关默认在开发环境开启；真实联调时需要关闭。
+- CORS：后端默认允许全部来源（仅限本机初版，后续需收紧）。
 
-## 技术栈（待定）
+## 构建检查
 
-由 D 类任务负责人确定，候选：React / Vue / Svelte。
+```powershell
+npm.cmd run build
+```

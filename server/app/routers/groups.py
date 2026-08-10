@@ -250,27 +250,37 @@ async def reorder_members(
     db = await get_db()
     await _check_group_exists(db, group_id)
 
-    if not body.orderedMemberIds:
-        return await _fetch_members(db, group_id)
+    current = await _fetch_members(db, group_id)
+    current_ids = [member.id for member in current]
+    ordered_ids = body.orderedMemberIds
+    if not ordered_ids and not current_ids:
+        return current
+    if len(ordered_ids) != len(set(ordered_ids)):
+        raise GatewayError(422, "validation_error", "orderedMemberIds 不能包含重复成员")
+    if set(ordered_ids) != set(current_ids):
+        raise GatewayError(
+            422,
+            "validation_error",
+            "orderedMemberIds 必须完整包含该分组的全部成员",
+        )
 
-    # 单事务内批量更新，保证顺序一致性。
-    # sqlite3 默认 isolation_level 下，首条 DML 自动开启隐式事务，
-    # 中间不 commit 则全部在同一事务中，最后统一 commit，出错 rollback。
+    # UNIQUE(group_id, priority_rank) 是立即约束，直接交换 1/2 会在第一条
+    # UPDATE 时冲突。先全部写入互不冲突的负数临时值，再写最终正序号。
     try:
-        for index, member_id in enumerate(body.orderedMemberIds, start=1):
-            cur = await db.execute(
+        await db.execute("BEGIN IMMEDIATE")
+        for index, member_id in enumerate(ordered_ids, start=1):
+            await db.execute(
+                "UPDATE api_group_member SET priority_rank = ? "
+                "WHERE id = ? AND group_id = ?",
+                (-index, member_id, group_id),
+            )
+        for index, member_id in enumerate(ordered_ids, start=1):
+            await db.execute(
                 "UPDATE api_group_member SET priority_rank = ? "
                 "WHERE id = ? AND group_id = ?",
                 (index, member_id, group_id),
             )
-            if cur.rowcount == 0:
-                raise NotFoundError(
-                    f"成员 {member_id} 不属于分组 {group_id}"
-                )
         await db.commit()
-    except NotFoundError:
-        await db.rollback()
-        raise
     except Exception as exc:
         await db.rollback()
         raise GatewayError(
