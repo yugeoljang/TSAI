@@ -54,12 +54,20 @@ object RouteResultMapper {
     }
 
     /**
-     * 失败时的友好文案。优先用网关 ErrorEnvelope 的 message（已是安全文案，
-     * 不含上游 sanitized_error 明细）；取不到时按 HTTP 状态兜底。
+     * 失败时的友好文案。按 error.type 优先映射固定文案，HTTP 状态兜底。
+     * 不展示网关 ErrorEnvelope 的 message：网关在"有候选但全挂"时会透出
+     * 最后一个上游响应体的错误原文（如 "Internal server error (simulated)."），
+     * 直接透出会把上游技术细节暴露给用户。
      */
     private fun friendlyError(outcome: GatewayCallOutcome): String {
-        val message = outcome.error?.message
-        if (!message.isNullOrBlank()) return message
+        val mapped = when (outcome.error?.type) {
+            "not_found" -> "找不到该 API 分组，或分组未启用。"
+            "all_upstreams_failed" -> "所有候选上游均不可用，请稍后再试。"
+            "request_timeout" -> "请求超时，已尝试全部候选上游。"
+            "rate_limited" -> "请求过于频繁，请稍后再试。"
+            else -> null
+        }
+        if (mapped != null) return mapped
         return when (outcome.httpStatus) {
             404 -> "找不到该 API 分组，或分组未启用。"
             429 -> "请求过于频繁，请稍后再试。"

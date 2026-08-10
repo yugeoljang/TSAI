@@ -67,11 +67,13 @@ class RouteResultMapperTest {
     }
 
     @Test
-    fun failurePrefersGatewayErrorMessage() {
+    fun typeMapOverridesGatewayMessage() {
+        // 网关"有候选但全挂"时会透出上游响应体原文（message 含技术细节），
+        // Android 必须按 error.type 映射固定友好文案，而不是展示 message。
         val outcome = GatewayCallOutcome(
             requestId = "req-3",
             error = ChatApiError(
-                message = "分组内没有可用上游",
+                message = "Internal server error (simulated).",
                 type = "all_upstreams_failed"
             ),
             httpStatus = 502
@@ -80,7 +82,7 @@ class RouteResultMapperTest {
         val result = RouteResultMapper.buildRouteResult(outcome, attempts = emptyList())
 
         assertFalse(result.success)
-        assertEquals("分组内没有可用上游", result.errorMessage)
+        assertEquals("所有候选上游均不可用，请稍后再试。", result.errorMessage)
     }
 
     @Test
