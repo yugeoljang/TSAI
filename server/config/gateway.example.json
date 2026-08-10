@@ -1,0 +1,38 @@
+{
+  "groups": [
+    {
+      "id": "demo-group",
+      "name": "演示分组",
+      "routeKey": "demo-route",
+      "enabled": true,
+      "members": [
+        {
+          "id": "member-primary",
+          "priority": 1,
+          "enabled": true,
+          "model": "provider-model-a",
+          "upstream": {
+            "id": "upstream-primary",
+            "name": "主 API",
+            "baseUrl": "https://example-provider-a.invalid/v1",
+            "apiKeyEnv": "UPSTREAM_PRIMARY_API_KEY",
+            "enabled": true
+          }
+        },
+        {
+          "id": "member-backup",
+          "priority": 2,
+          "enabled": true,
+          "model": "provider-model-b",
+          "upstream": {
+            "id": "upstream-backup",
+            "name": "备用 API",
+            "baseUrl": "https://example-provider-b.invalid/v1",
+            "apiKeyEnv": "UPSTREAM_BACKUP_API_KEY",
+            "enabled": true
+          }
+        }
+      ]
+    }
+  ]
+}
