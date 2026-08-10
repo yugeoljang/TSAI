@@ -1,0 +1,28 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f5f7fa;
+}
+
+.page {
+  padding: 20px 24px;
+}
+
+/* 表格里的次要说明文字 */
+.muted {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
