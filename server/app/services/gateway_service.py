@@ -281,6 +281,7 @@ async def route_chat_completion(
             status = response.status_code
             parsed = safe_json(response)
             if 200 <= status < 300 and parsed is not None:
+                parsed = normalize_chat_completion(parsed, route_key, request_id)
                 await record_attempt(
                     db,
                     request_id=request_id,
@@ -378,3 +379,112 @@ def error_envelope(status: int, error_type: str, message: str, request_id: str) 
             "requestId": request_id,
         }
     }
+
+
+def normalize_chat_completion(
+    payload: Any,
+    model: str = "gateway-model",
+    request_id: str = "gateway-request",
+) -> Any:
+    """Normalize successful OpenAI-compatible content for strict clients.
+
+    Some compatible providers return ``message.content`` as an array of text
+    parts or as an object. Several desktop clients only accept a string and
+    call string methods while rendering, so flatten those variants here.
+    Unknown response shapes are otherwise passed through unchanged.
+    """
+    if not isinstance(payload, dict):
+        return payload
+
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return payload
+
+    normalized_choices: list[dict[str, Any]] = []
+    for fallback_index, choice in enumerate(choices):
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+        index = choice.get("index", fallback_index)
+        if not isinstance(index, int):
+            index = fallback_index
+        finish_reason = choice.get("finish_reason")
+        if finish_reason is not None and not isinstance(finish_reason, str):
+            finish_reason = str(finish_reason)
+        normalized_choices.append({
+            "index": index,
+            "message": {
+                "role": "assistant",
+                "content": content_as_text(message.get("content")),
+            },
+            "finish_reason": finish_reason,
+        })
+
+    created = payload.get("created")
+    if not isinstance(created, int):
+        created = int(time.time())
+    response_id = payload.get("id")
+    if not isinstance(response_id, str) or not response_id:
+        response_id = f"chatcmpl-{request_id}"
+
+    normalized: dict[str, Any] = {
+        "id": response_id,
+        "object": "chat.completion",
+        "created": created,
+        # Return the virtual gateway model, not a provider-specific object or id.
+        "model": model,
+        "choices": normalized_choices,
+    }
+    usage = normalize_usage(payload.get("usage"))
+    if usage is not None:
+        normalized["usage"] = usage
+    return normalized
+
+
+def normalize_usage(usage: Any) -> dict[str, int] | None:
+    if not isinstance(usage, dict):
+        return None
+
+    def token_count(name: str) -> int:
+        value = usage.get(name, 0)
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, (int, float)):
+            return max(0, int(value))
+        return 0
+
+    prompt = token_count("prompt_tokens")
+    completion = token_count("completion_tokens")
+    total = token_count("total_tokens") or prompt + completion
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+    }
+
+
+def content_as_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text", item.get("content"))
+                if isinstance(text, str):
+                    parts.append(text)
+                elif text is not None:
+                    parts.append(str(text))
+        return "".join(parts)
+    if isinstance(content, dict):
+        text = content.get("text", content.get("content"))
+        if isinstance(text, str):
+            return text
+        return json.dumps(content, ensure_ascii=False)
+    return str(content)

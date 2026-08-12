@@ -9,7 +9,9 @@ from app.config import settings
 from app.security import encrypt_api_key
 from app.services.gateway_service import (
     chat_completions_url,
+    content_as_text,
     create_gateway_request,
+    normalize_chat_completion,
     route_chat_completion,
     utc_now,
 )
@@ -161,6 +163,54 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             chat_completions_url("https://example.com/v1/chat/completions"),
             "https://example.com/v1/chat/completions",
         )
+
+    def test_normalizes_array_and_object_message_content(self) -> None:
+        payload = {
+            "choices": [
+                {"message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "网关"},
+                    {"type": "text", "text": "调用成功"},
+                ]}},
+                {"message": {"role": "assistant", "content": {"text": "备用回答"}}},
+            ]
+        }
+
+        normalized = normalize_chat_completion(payload, "my-test-route", "request-3")
+
+        self.assertEqual(normalized["choices"][0]["message"]["content"], "网关调用成功")
+        self.assertEqual(normalized["choices"][1]["message"]["content"], "备用回答")
+        self.assertEqual(normalized["model"], "my-test-route")
+        self.assertEqual(normalized["object"], "chat.completion")
+        self.assertIsInstance(normalized["created"], int)
+        self.assertEqual(content_as_text(None), "")
+
+    def test_normalizes_non_string_model_and_usage_fields(self) -> None:
+        payload = {
+            "id": 123,
+            "model": {"name": "provider-model"},
+            "choices": [{
+                "index": "0",
+                "message": {"role": "assistant", "content": "成功"},
+                "finish_reason": {"type": "stop"},
+            }],
+            "usage": {
+                "prompt_tokens": 12.8,
+                "completion_tokens": "bad-value",
+                "total_tokens": None,
+            },
+        }
+
+        normalized = normalize_chat_completion(payload, "my-test-route", "request-4")
+
+        self.assertEqual(normalized["id"], "chatcmpl-request-4")
+        self.assertEqual(normalized["model"], "my-test-route")
+        self.assertEqual(normalized["choices"][0]["index"], 0)
+        self.assertIsInstance(normalized["choices"][0]["finish_reason"], str)
+        self.assertEqual(normalized["usage"], {
+            "prompt_tokens": 12,
+            "completion_tokens": 0,
+            "total_tokens": 12,
+        })
 
 
 if __name__ == "__main__":

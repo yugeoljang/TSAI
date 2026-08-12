@@ -155,3 +155,30 @@ AGGREGATOR_BASE_URL=https://your-service.example.com/
 - 发布版不记录请求体和 Authorization。
 - `provider_settings.xml` 已排除在云备份和设备迁移之外。
 - Web 版本不应把平台 API Key 保存在浏览器，应通过自己的后端代理调用。
+# Personal Gateway Plus
+
+## Windows one-click start
+
+Double-click `start-all.bat`, or run it from PowerShell/CMD:
+
+```powershell
+cd C:\Users\TSCQ\Desktop\TS
+.\start-all.bat
+```
+
+It starts the FastAPI backend, Web management UI, and mock upstream in one
+terminal. Open `http://127.0.0.1:5173`, and press `Ctrl+C` in the terminal to
+stop all services.
+
+If real upstream APIs are being used and the mock service is unnecessary:
+
+```powershell
+.\start-all.bat -NoMock
+```
+
+If an older project process is still using ports 8000, 5173, or 8100, either
+press `Ctrl+C` in its old terminal or let the launcher replace it:
+
+```powershell
+.\start-all.bat -NoMock -Restart
+```
