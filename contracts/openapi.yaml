@@ -403,22 +403,12 @@ paths:
           in: query
           schema:
             type: string
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ModelCatalogEntry'
-
-  /api/admin/prices:
-    get:
-      tags: [catalog]
-      summary: 价格快照列表（含来源与更新时间）
-      parameters:
-        - name: providerId
+        - name: includeDisabled
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: keyword
           in: query
           schema:
             type: string
@@ -430,7 +420,139 @@ paths:
               schema:
                 type: array
                 items:
+                  $ref: '#/components/schemas/ModelCatalogEntry'
+    post:
+      tags: [catalog]
+      summary: 新增模型目录项
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelCatalogCreate'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelCatalogEntry'
+
+  /api/admin/models/{modelId}:
+    parameters:
+      - name: modelId
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [catalog]
+      summary: 更新模型目录项
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelCatalogUpdate'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelCatalogEntry'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [catalog]
+      summary: 删除模型目录项及其价格快照
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/admin/prices:
+    get:
+      tags: [catalog]
+      summary: 价格快照列表（含来源与更新时间）
+      parameters:
+        - name: providerId
+          in: query
+          schema:
+            type: string
+        - name: modelCatalogEntryId
+          in: query
+          schema:
+            type: string
+        - name: currentOnly
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
                   $ref: '#/components/schemas/PriceSnapshot'
+    post:
+      tags: [catalog]
+      summary: 发布新的当前价格快照
+      description: 同一模型原有的当前快照会自动归档。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PriceSnapshotCreate'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceSnapshot'
+
+  /api/admin/prices/history/{modelId}:
+    get:
+      tags: [catalog]
+      summary: 查询指定模型的全部价格历史
+      parameters:
+        - name: modelId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PriceSnapshot'
+
+  /api/admin/prices/{priceId}:
+    delete:
+      tags: [catalog]
+      summary: 删除价格快照
+      description: 删除当前快照时，系统会恢复该模型最近的一条历史快照为当前价格。
+      parameters:
+        - name: priceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/admin/promotions:
     get:
@@ -446,6 +568,11 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: lifecycleStatus
+          in: query
+          schema:
+            type: string
+            enum: [draft, upcoming, active, expired]
       responses:
         '200':
           description: 成功
@@ -455,6 +582,56 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Promotion'
+    post:
+      tags: [catalog]
+      summary: 新增活动
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromotionCreate'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Promotion'
+
+  /api/admin/promotions/{promotionId}:
+    parameters:
+      - name: promotionId
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [catalog]
+      summary: 更新活动
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromotionUpdate'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Promotion'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [catalog]
+      summary: 删除活动
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ------------------------------------------------------------
   # 路由记录
@@ -872,6 +1049,48 @@ components:
         verifiedAt:
           type: string
           format: date
+    ModelCatalogCreate:
+      type: object
+      required: [providerId, upstreamModelId, displayName]
+      properties:
+        providerId:
+          type: string
+        upstreamModelId:
+          type: string
+        displayName:
+          type: string
+        contextWindow:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+          default: true
+        sourceUrl:
+          type: string
+          format: uri
+        verifiedAt:
+          type: string
+          format: date-time
+    ModelCatalogUpdate:
+      type: object
+      properties:
+        upstreamModelId:
+          type: string
+        displayName:
+          type: string
+        contextWindow:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        sourceUrl:
+          type: string
+          format: uri
+          nullable: true
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
     PriceSnapshot:
       type: object
       properties:
@@ -895,7 +1114,37 @@ components:
           format: date
         verifiedAt:
           type: string
-          format: date
+          format: date-time
+        isCurrent:
+          type: boolean
+          description: 是否为该模型当前生效的价格
+    PriceSnapshotCreate:
+      type: object
+      required: [modelCatalogEntryId, currency, sourceUrl, effectiveFrom, verifiedAt]
+      properties:
+        modelCatalogEntryId:
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        inputPricePerMillionTokens:
+          type: number
+          minimum: 0
+          nullable: true
+        outputPricePerMillionTokens:
+          type: number
+          minimum: 0
+          nullable: true
+        sourceUrl:
+          type: string
+          format: uri
+        effectiveFrom:
+          type: string
+          format: date-time
+        verifiedAt:
+          type: string
+          format: date-time
     Promotion:
       type: object
       properties:
@@ -921,9 +1170,82 @@ components:
         active:
           type: boolean
           description: 当前是否在有效期内
+        status:
+          type: string
+          enum: [draft, verified, expired]
+        lifecycleStatus:
+          type: string
+          enum: [draft, upcoming, active, expired]
         verifiedAt:
           type: string
-          format: date
+          format: date-time
+          nullable: true
+    PromotionCreate:
+      type: object
+      required: [providerId, title, type]
+      properties:
+        providerId:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+          enum: [discount, credit, price_change]
+        description:
+          type: string
+          nullable: true
+        sourceUrl:
+          type: string
+          format: uri
+          nullable: true
+        startsAt:
+          type: string
+          format: date-time
+          nullable: true
+        endsAt:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [draft, verified, expired]
+          default: draft
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+    PromotionUpdate:
+      type: object
+      properties:
+        providerId:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+          enum: [discount, credit, price_change]
+        description:
+          type: string
+          nullable: true
+        sourceUrl:
+          type: string
+          format: uri
+          nullable: true
+        startsAt:
+          type: string
+          format: date-time
+          nullable: true
+        endsAt:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [draft, verified, expired]
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
 
     # ---------- API 分组 ----------
     ApiGroup:

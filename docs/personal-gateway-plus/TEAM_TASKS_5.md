@@ -1,5 +1,7 @@
 # Personal Gateway Plus：五人协作任务拆分
 
+> 历史分工文档：其中 Android 任务自 2026-08-18 起作废，当前开发和验收只覆盖 Web 与服务端。
+
 > 状态：待认领  
 > 最后更新：2026-08-04  
 > 适用范围：当前 Android 基础版本之后尚未完成的 Personal Gateway Plus 功能

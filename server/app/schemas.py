@@ -5,9 +5,9 @@
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ============================================================
@@ -102,6 +102,25 @@ class ModelCatalogEntry(BaseModel):
     verifiedAt: str | None = None
 
 
+class ModelCatalogCreate(BaseModel):
+    providerId: str = Field(min_length=1)
+    upstreamModelId: str = Field(min_length=1)
+    displayName: str = Field(min_length=1)
+    contextWindow: int | None = Field(default=None, ge=1)
+    enabled: bool = True
+    sourceUrl: str = Field(min_length=1)
+    verifiedAt: str = Field(min_length=1)
+
+
+class ModelCatalogUpdate(BaseModel):
+    upstreamModelId: str | None = Field(default=None, min_length=1)
+    displayName: str | None = Field(default=None, min_length=1)
+    contextWindow: int | None = Field(default=None, ge=1)
+    enabled: bool | None = None
+    sourceUrl: str | None = Field(default=None, min_length=1)
+    verifiedAt: str | None = Field(default=None, min_length=1)
+
+
 class PriceSnapshot(BaseModel):
     id: str
     providerId: str
@@ -112,6 +131,27 @@ class PriceSnapshot(BaseModel):
     sourceUrl: str | None = None
     effectiveFrom: str | None = None
     verifiedAt: str | None = None
+    isCurrent: bool = True
+
+
+class PriceSnapshotCreate(BaseModel):
+    modelCatalogEntryId: str = Field(min_length=1)
+    currency: str = Field(default="CNY", min_length=3, max_length=3)
+    inputPricePerMillionTokens: float | None = Field(default=None, ge=0)
+    outputPricePerMillionTokens: float | None = Field(default=None, ge=0)
+    sourceUrl: str = Field(min_length=1)
+    effectiveFrom: str = Field(min_length=1)
+    verifiedAt: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_at_least_one_price(self) -> "PriceSnapshotCreate":
+        if (
+            self.inputPricePerMillionTokens is None
+            and self.outputPricePerMillionTokens is None
+        ):
+            raise ValueError("输入价和输出价至少填写一项")
+        self.currency = self.currency.upper()
+        return self
 
 
 class Promotion(BaseModel):
@@ -124,6 +164,36 @@ class Promotion(BaseModel):
     startsAt: str | None = None
     endsAt: str | None = None
     active: bool = False
+    status: Literal["draft", "verified", "expired"] = "draft"
+    lifecycleStatus: Literal["draft", "upcoming", "active", "expired"] = "draft"
+    verifiedAt: str | None = None
+
+
+PromotionType = Literal["discount", "credit", "price_change"]
+PromotionStatus = Literal["draft", "verified", "expired"]
+
+
+class PromotionCreate(BaseModel):
+    providerId: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    type: PromotionType
+    description: str | None = None
+    sourceUrl: str | None = None
+    startsAt: str | None = None
+    endsAt: str | None = None
+    status: PromotionStatus = "draft"
+    verifiedAt: str | None = None
+
+
+class PromotionUpdate(BaseModel):
+    providerId: str | None = Field(default=None, min_length=1)
+    title: str | None = Field(default=None, min_length=1)
+    type: PromotionType | None = None
+    description: str | None = None
+    sourceUrl: str | None = None
+    startsAt: str | None = None
+    endsAt: str | None = None
+    status: PromotionStatus | None = None
     verifiedAt: str | None = None
 
 

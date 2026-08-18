@@ -20,7 +20,14 @@ import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
   ErrorType,
+  ModelCatalogCreate,
+  ModelCatalogEntry,
+  ModelCatalogUpdate,
+  PriceSnapshot,
+  PriceSnapshotCreate,
   Promotion,
+  PromotionCreate,
+  PromotionUpdate,
   Provider,
   ProviderCreate,
   ProviderUpdate,
@@ -111,11 +118,11 @@ function route(
     case 'groups':
       return groupsRoute(method, id, sub, subId, body)
     case 'models':
-      return ok(filterByProvider(db.models, q))
+      return modelsRoute(method, id, q, body)
     case 'prices':
-      return ok(filterByProvider(db.prices, q))
+      return pricesRoute(method, id, sub, q, body)
     case 'promotions':
-      return promotionsRoute(q)
+      return promotionsRoute(method, id, q, body)
     case 'requests':
       return requestsRoute(id, sub, q)
     default:
@@ -392,19 +399,128 @@ function membersRoute(
   fail(404, 'not_found', '不支持的操作')
 }
 
+// ---------- 模型与价格 ----------
+
+function modelsRoute(method: HttpMethod, id: string | undefined, q: URLSearchParams, body: unknown): ApiResponse<unknown> {
+  if (!id) {
+    if (method === 'GET') {
+      let list = filterByProvider(db.models, q)
+      if (q.get('includeDisabled') !== 'true') list = list.filter((m) => m.enabled)
+      const keyword = q.get('keyword')?.trim().toLowerCase()
+      if (keyword) list = list.filter((m) => `${m.displayName} ${m.upstreamModelId}`.toLowerCase().includes(keyword))
+      return ok(list)
+    }
+    if (method === 'POST') {
+      const input = body as ModelCatalogCreate
+      if (!db.providers.some((p) => p.id === input.providerId)) fail(404, 'not_found', '供应商不存在')
+      if (db.models.some((m) => m.providerId === input.providerId && m.upstreamModelId === input.upstreamModelId)) {
+        fail(409, 'conflict', '同一供应商下不能重复添加相同模型 ID')
+      }
+      const created: ModelCatalogEntry = { id: db.nextId('model'), ...input, enabled: input.enabled ?? true }
+      db.models.push(created)
+      return ok(created)
+    }
+  }
+  const idx = db.models.findIndex((m) => m.id === id)
+  if (idx === -1) fail(404, 'not_found', '模型不存在')
+  if (method === 'PATCH') {
+    const patch = body as ModelCatalogUpdate
+    db.models[idx] = { ...db.models[idx], ...patch }
+    return ok(db.models[idx])
+  }
+  if (method === 'DELETE') {
+    db.models.splice(idx, 1)
+    for (let i = db.prices.length - 1; i >= 0; i--) if (db.prices[i].modelCatalogEntryId === id) db.prices.splice(i, 1)
+    return ok(undefined)
+  }
+  fail(404, 'not_found', '不支持的模型操作')
+}
+
+function pricesRoute(method: HttpMethod, id: string | undefined, sub: string | undefined,
+  q: URLSearchParams, body: unknown): ApiResponse<unknown> {
+  if (id === 'history' && sub && method === 'GET') {
+    return ok(db.prices.filter((p) => p.modelCatalogEntryId === sub)
+      .sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent) || (b.effectiveFrom ?? '').localeCompare(a.effectiveFrom ?? '')))
+  }
+  if (!id) {
+    if (method === 'GET') {
+      let list = filterByProvider(db.prices, q)
+      if (q.get('currentOnly') !== 'false') list = list.filter((p) => p.isCurrent)
+      const modelId = q.get('modelCatalogEntryId')
+      if (modelId) list = list.filter((p) => p.modelCatalogEntryId === modelId)
+      return ok(list)
+    }
+    if (method === 'POST') {
+      const input = body as PriceSnapshotCreate
+      const model = db.models.find((m) => m.id === input.modelCatalogEntryId)
+      if (!model) fail(404, 'not_found', '模型不存在')
+      if (input.inputPricePerMillionTokens == null && input.outputPricePerMillionTokens == null) {
+        fail(422, 'validation_error', '输入价和输出价至少填写一项')
+      }
+      db.prices.filter((p) => p.modelCatalogEntryId === input.modelCatalogEntryId).forEach((p) => (p.isCurrent = false))
+      const created: PriceSnapshot = {
+        id: db.nextId('price'), providerId: model.providerId, ...input,
+        currency: input.currency.toUpperCase(), isCurrent: true,
+      }
+      db.prices.push(created)
+      return ok(created)
+    }
+  }
+  const idx = db.prices.findIndex((p) => p.id === id)
+  if (idx === -1) fail(404, 'not_found', '价格快照不存在')
+  if (method === 'DELETE') {
+    const removed = db.prices[idx]
+    db.prices.splice(idx, 1)
+    if (removed.isCurrent) {
+      const previous = db.prices.filter((p) => p.modelCatalogEntryId === removed.modelCatalogEntryId)
+        .sort((a, b) => (b.effectiveFrom ?? '').localeCompare(a.effectiveFrom ?? ''))[0]
+      if (previous) previous.isCurrent = true
+    }
+    return ok(undefined)
+  }
+  fail(404, 'not_found', '不支持的价格操作')
+}
+
 // ---------- 活动 ----------
 
-function promotionsRoute(q: URLSearchParams): ApiResponse<Promotion[]> {
+function promotionDto(p: (typeof db.promotions)[number]): Promotion {
   const now = Date.now()
-  let list: Promotion[] = db.promotions.map((p) => {
-    const starts = p.startsAt ? Date.parse(p.startsAt) : -Infinity
-    const ends = p.endsAt ? Date.parse(p.endsAt) : Infinity
-    return { ...p, active: now >= starts && now <= ends }
-  })
+  const starts = p.startsAt ? Date.parse(p.startsAt) : -Infinity
+  const ends = p.endsAt ? Date.parse(p.endsAt) : Infinity
+  const lifecycleStatus = p.status === 'draft' ? 'draft'
+    : p.status === 'expired' || now > ends ? 'expired'
+      : now < starts ? 'upcoming' : 'active'
+  return { ...p, active: lifecycleStatus === 'active', lifecycleStatus }
+}
+
+function promotionsRoute(method: HttpMethod, id: string | undefined, q: URLSearchParams, body: unknown): ApiResponse<unknown> {
+  if (!id && method === 'POST') {
+    const input = body as PromotionCreate
+    if (!db.providers.some((p) => p.id === input.providerId)) fail(404, 'not_found', '供应商不存在')
+    const created = { id: db.nextId('promo'), ...input, status: input.status ?? 'draft' } as (typeof db.promotions)[number]
+    db.promotions.push(created)
+    return ok(promotionDto(created))
+  }
+  if (id) {
+    const idx = db.promotions.findIndex((p) => p.id === id)
+    if (idx === -1) fail(404, 'not_found', '活动不存在')
+    if (method === 'PATCH') {
+      db.promotions[idx] = { ...db.promotions[idx], ...(body as PromotionUpdate) }
+      return ok(promotionDto(db.promotions[idx]))
+    }
+    if (method === 'DELETE') {
+      db.promotions.splice(idx, 1)
+      return ok(undefined)
+    }
+  }
+
+  let list = db.promotions.map(promotionDto)
 
   const pid = q.get('providerId')
   if (pid) list = list.filter((p) => p.providerId === pid)
   if (q.get('activeOnly') === 'true') list = list.filter((p) => p.active)
+  const lifecycle = q.get('lifecycleStatus')
+  if (lifecycle) list = list.filter((p) => p.lifecycleStatus === lifecycle)
 
   return ok(list)
 }

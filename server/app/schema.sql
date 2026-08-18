@@ -140,3 +140,7 @@ CREATE INDEX IF NOT EXISTS idx_price_model ON price_snapshot(model_catalog_entry
 CREATE INDEX IF NOT EXISTS idx_promo_provider ON promotion(provider_id);
 CREATE INDEX IF NOT EXISTS idx_member_group ON api_group_member(group_id);
 CREATE INDEX IF NOT EXISTS idx_attempt_request ON route_attempt(request_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_model_provider_upstream
+    ON model_catalog_entry(provider_id, upstream_model_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_current_price_model
+    ON price_snapshot(model_catalog_entry_id) WHERE is_current = 1;

@@ -1,7 +1,9 @@
 # 模块、领域模型与自动路由设计
 
-状态：设计草案  
-更新时间：2026-08-03
+状态：Web-first 实施基线
+更新时间：2026-08-18
+
+> 范围说明：当前开发与验收只覆盖 Web 管理端和 FastAPI 服务端。Android 工程仅保留为历史代码，不再安排新功能。
 
 ## 1. 模块拆分
 
@@ -19,7 +21,6 @@
 | 协议适配器 | 统一请求、响应、错误与用量 | OpenAI Chat Completions 转发 |
 | 用量与审计 | 记录 Token、耗时、成本和尝试链 | 请求记录、路由尝试、每日统计 |
 | Web 管理端 | 管理配置、分组、价格和运行状态 | Dashboard、供应商、分组、日志页面 |
-| Android 客户端 | 移动查看、配置和告警 | 接入后端，不再保存正式上游主密钥 |
 
 ## 2. 领域模型
 
@@ -70,7 +71,8 @@
 - `type`：折扣、赠送额度、价格调整
 - `description`、`sourceUrl`
 - `startsAt`、`endsAt`
-- `status`：草稿、已验证、已过期
+- `status`：待核验草稿、已核验发布、手动结束
+- `lifecycleStatus`：待核验、未开始、进行中、已过期（服务端动态计算）
 - `verifiedAt`
 
 没有来源或有效期不明确的内容不得标记为“已验证活动”。
@@ -220,9 +222,9 @@ stateDiagram-v2
 - `GET/POST /api/admin/providers`
 - `GET/POST/PATCH/DELETE /api/admin/upstreams`
 - `POST /api/admin/upstreams/{id}/test`
-- `GET/POST /api/admin/models`
-- `GET /api/admin/prices`
-- `GET /api/admin/promotions`
+- `GET/POST/PATCH/DELETE /api/admin/models`
+- `GET/POST/DELETE /api/admin/prices`、`GET /api/admin/prices/history/{modelId}`
+- `GET/POST/PATCH/DELETE /api/admin/promotions`
 - `GET/POST/PATCH/DELETE /api/admin/groups`
 - `PUT /api/admin/groups/{id}/members/order`
 - `POST /api/admin/groups/{id}/dry-run`
@@ -246,8 +248,10 @@ stateDiagram-v2
 
 来源优先级：官方结构化 API → 官方页面人工核对 → 合规定时采集 → 社区线索待核实。
 
-采集任务只生成候选快照，价格变化经校验后发布。所有价格标准化为每百万 Token，
-同时保留原币种、地区、阶梯、缓存价和批量价，不能用单一数字覆盖复杂计费规则。
+当前版本先完成可审计的人工维护闭环：新价格只能以快照发布，旧价格自动归档；活动在
+核验发布前必须有来源和有效期。后续采集任务只能生成候选快照，价格变化经人工或规则
+校验后才能发布。所有价格标准化为每百万 Token，同时保留原币种，不能用单一数字覆盖
+地区、阶梯、缓存价和批量价等复杂计费规则。
 
 ## 8. Web 页面
 
@@ -261,4 +265,3 @@ stateDiagram-v2
 | 路由记录 | 候选、尝试顺序、错误和最终上游 |
 | 用量与成本 | Token、供应商、模型、日/月成本 |
 | 系统设置 | 站内令牌、采集频率、告警和备份 |
-

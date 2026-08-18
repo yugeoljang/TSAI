@@ -6,7 +6,7 @@
  *   - sf-deepseek-v3 没有价格记录 → 用来验证「价格缺失不显示成 0」
  *   - promo-3 已于 2026-05-01 结束   → 用来验证「有效 / 过期」区分
  *
- * 数据存活于内存，刷新页面即回到种子状态（横幅已明示「数据不落库」）。
+ * 数据同时保存到 localStorage，便于在纯前端 Mock 模式下演示完整管理流程。
  */
 import type {
   ApiGroup,
@@ -72,21 +72,21 @@ export const models: ModelCatalogEntry[] = [
 
 // 注意：故意没有 sf-deepseek-v3 的价格
 export const prices: PriceSnapshot[] = [
-  { id: 'price-1', providerId: 'deepseek', modelCatalogEntryId: 'deepseek-chat', currency: 'CNY', inputPricePerMillionTokens: 1.0, outputPricePerMillionTokens: 8.0, sourceUrl: DS_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29' },
-  { id: 'price-2', providerId: 'deepseek', modelCatalogEntryId: 'deepseek-reasoner', currency: 'CNY', inputPricePerMillionTokens: 4.0, outputPricePerMillionTokens: 16.0, sourceUrl: DS_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29' },
-  { id: 'price-3', providerId: 'siliconflow', modelCatalogEntryId: 'sf-qwen-72b', currency: 'CNY', inputPricePerMillionTokens: 4.13, outputPricePerMillionTokens: 4.13, sourceUrl: SF_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29' },
-  { id: 'price-4', providerId: 'openai', modelCatalogEntryId: 'openai-gpt-4o', currency: 'USD', inputPricePerMillionTokens: 2.5, outputPricePerMillionTokens: 10.0, sourceUrl: OA_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29' },
-  { id: 'price-5', providerId: 'openai', modelCatalogEntryId: 'openai-gpt-4o-mini', currency: 'USD', inputPricePerMillionTokens: 0.15, outputPricePerMillionTokens: 0.6, sourceUrl: OA_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29' },
-  { id: 'price-6', providerId: 'openai', modelCatalogEntryId: 'openai-gpt-4.1', currency: 'USD', inputPricePerMillionTokens: 2.0, outputPricePerMillionTokens: 8.0, sourceUrl: OA_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29' },
-  { id: 'price-7', providerId: 'openai', modelCatalogEntryId: 'openai-gpt-4.1-mini', currency: 'USD', inputPricePerMillionTokens: 0.4, outputPricePerMillionTokens: 1.6, sourceUrl: OA_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29' },
+  { id: 'price-1', providerId: 'deepseek', modelCatalogEntryId: 'deepseek-chat', currency: 'CNY', inputPricePerMillionTokens: 1.0, outputPricePerMillionTokens: 8.0, sourceUrl: DS_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29', isCurrent: true },
+  { id: 'price-2', providerId: 'deepseek', modelCatalogEntryId: 'deepseek-reasoner', currency: 'CNY', inputPricePerMillionTokens: 4.0, outputPricePerMillionTokens: 16.0, sourceUrl: DS_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29', isCurrent: true },
+  { id: 'price-3', providerId: 'siliconflow', modelCatalogEntryId: 'sf-qwen-72b', currency: 'CNY', inputPricePerMillionTokens: 4.13, outputPricePerMillionTokens: 4.13, sourceUrl: SF_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29', isCurrent: true },
+  { id: 'price-4', providerId: 'openai', modelCatalogEntryId: 'openai-gpt-4o', currency: 'USD', inputPricePerMillionTokens: 2.5, outputPricePerMillionTokens: 10.0, sourceUrl: OA_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29', isCurrent: true },
+  { id: 'price-5', providerId: 'openai', modelCatalogEntryId: 'openai-gpt-4o-mini', currency: 'USD', inputPricePerMillionTokens: 0.15, outputPricePerMillionTokens: 0.6, sourceUrl: OA_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29', isCurrent: true },
+  { id: 'price-6', providerId: 'openai', modelCatalogEntryId: 'openai-gpt-4.1', currency: 'USD', inputPricePerMillionTokens: 2.0, outputPricePerMillionTokens: 8.0, sourceUrl: OA_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29', isCurrent: true },
+  { id: 'price-7', providerId: 'openai', modelCatalogEntryId: 'openai-gpt-4.1-mini', currency: 'USD', inputPricePerMillionTokens: 0.4, outputPricePerMillionTokens: 1.6, sourceUrl: OA_SRC, effectiveFrom: '2026-07-29', verifiedAt: '2026-07-29', isCurrent: true },
 ]
 
 // active 由 handlers.ts 按当前时间推导，这里存的是原始有效期
-export const promotions: Omit<Promotion, 'active'>[] = [
-  { id: 'promo-1', providerId: 'deepseek', title: 'DeepSeek 重磅升级', type: 'price_change', description: 'DeepSeek-V3 上线，输入价格大幅降低。', sourceUrl: DS_SRC, startsAt: '2026-07-01T00:00:00Z', endsAt: '2026-12-31T23:59:59Z', verifiedAt: '2026-07-29' },
-  { id: 'promo-2', providerId: 'siliconflow', title: 'SiliconFlow 新用户赠送额度', type: 'credit', description: '注册即送 14 元额度，可用于所有开源模型调用。', sourceUrl: SF_SRC, startsAt: '2026-06-01T00:00:00Z', endsAt: '2026-09-30T23:59:59Z', verifiedAt: '2026-07-29' },
+export const promotions: Omit<Promotion, 'active' | 'lifecycleStatus'>[] = [
+  { id: 'promo-1', providerId: 'deepseek', title: 'DeepSeek 重磅升级', type: 'price_change', description: 'DeepSeek-V3 上线，输入价格大幅降低。', sourceUrl: DS_SRC, startsAt: '2026-07-01T00:00:00Z', endsAt: '2026-12-31T23:59:59Z', status: 'verified', verifiedAt: '2026-07-29' },
+  { id: 'promo-2', providerId: 'siliconflow', title: 'SiliconFlow 新用户赠送额度', type: 'credit', description: '注册即送 14 元额度，可用于所有开源模型调用。', sourceUrl: SF_SRC, startsAt: '2026-06-01T00:00:00Z', endsAt: '2026-09-30T23:59:59Z', status: 'verified', verifiedAt: '2026-07-29' },
   // 已过期，用于验证过期标记
-  { id: 'promo-3', providerId: 'openai', title: 'GPT-4.1 系列发布', type: 'price_change', description: 'GPT-4.1 相比 GPT-4o 降价并提升上下文能力。', sourceUrl: OA_SRC, startsAt: '2026-04-01T00:00:00Z', endsAt: '2026-05-01T00:00:00Z', verifiedAt: '2026-07-29' },
+  { id: 'promo-3', providerId: 'openai', title: 'GPT-4.1 系列发布', type: 'price_change', description: 'GPT-4.1 相比 GPT-4o 降价并提升上下文能力。', sourceUrl: OA_SRC, startsAt: '2026-04-01T00:00:00Z', endsAt: '2026-05-01T00:00:00Z', status: 'verified', verifiedAt: '2026-07-29' },
 ]
 
 // 后端 seed 同样不预置这些，演示时由用户在页面上创建
@@ -127,6 +127,9 @@ const STORE_KEY = 'pgp.mockdb.v1'
 
 interface Persisted {
   providers: Provider[]
+  models: ModelCatalogEntry[]
+  prices: PriceSnapshot[]
+  promotions: Omit<Promotion, 'active' | 'lifecycleStatus'>[]
   upstreams: UpstreamEndpoint[]
   groups: ApiGroup[]
   members: ApiGroupMember[]
@@ -146,6 +149,9 @@ export function save(): void {
   try {
     const snapshot: Persisted = {
       providers,
+      models,
+      prices,
+      promotions,
       upstreams,
       groups,
       members,
@@ -165,6 +171,9 @@ export function load(): void {
     if (!raw) return
     const s = JSON.parse(raw) as Partial<Persisted>
     refill(providers, s.providers)
+    refill(models, s.models)
+    refill(prices, s.prices)
+    refill(promotions, s.promotions)
     refill(upstreams, s.upstreams)
     refill(groups, s.groups)
     refill(members, s.members)

@@ -1,7 +1,9 @@
 # Personal Gateway Plus：产品与总体架构
 
-状态：设计草案  
-更新时间：2026-08-03
+状态：Web-first 实施基线
+更新时间：2026-08-18
+
+> 当前开发与验收范围为 Web 管理端和 FastAPI 服务端；Android 工程只作历史代码保留。
 
 ## 1. 选题名称
 
@@ -29,7 +31,7 @@ Personal Gateway Plus 是面向个人开发者和小型团队的自托管大模�
 3. 支持 API 分组、人工排序、健康检测、熔断和顺序故障转移。
 4. 聚合模型目录、标准价格、价格快照、折扣和活动有效期。
 5. 记录路由过程、用量、延迟、错误与估算成本。
-6. 让 Web 管理端和 Android 客户端共用同一后端和接口契约。
+6. 让 Web 管理端、网关和第三方 Agent 共用同一后端和接口契约。
 
 ### 第一阶段非目标
 
@@ -37,7 +39,7 @@ Personal Gateway Plus 是面向个人开发者和小型团队的自托管大模�
 - 不做复杂多租户 RBAC；先完成单用户自托管，同时预留 `ownerId`。
 - 不承诺在已经输出流式 Token 后无缝切换上游。
 - 不通过抓取绕过登录、验证码、访问控制或供应商服务条款。
-- 不在浏览器或 Android 安装包里保存供应商主密钥。
+- 不在浏览器中保存供应商主密钥。
 
 ## 4. 主要场景
 
@@ -51,7 +53,6 @@ Personal Gateway Plus 是面向个人开发者和小型团队的自托管大模�
 
 ```mermaid
 flowchart LR
-    A["Android 客户端"] --> G["Gateway API"]
     W["Web 管理端"] --> C["Admin API"]
     X["第三方 SDK / 工具"] --> G
 
@@ -88,7 +89,6 @@ flowchart LR
 
 - 上游 API Key 只存在后端加密存储；客户端只能看到 `sk-****abcd`。
 - 模型、价格、活动、分组顺序、健康状态和路由记录以后端为准。
-- Android 当前的内置参考数据只用于离线演示，不参与正式路由。
 
 ### 契约优先
 
@@ -103,24 +103,16 @@ flowchart LR
 
 ## 7. 建议仓库结构
 
-当前保留 Android `app/`，逐步增加目录，不立即做大规模搬迁：
+当前 Web-first 仓库结构如下：
 
 ```text
 TS/
-├── app/                         # 现有 Android 客户端
-├── server/                      # Kotlin/Ktor 后端（计划）
-│   ├── gateway/                 # OpenAI 兼容数据面
-│   ├── admin/                   # 管理接口与鉴权
-│   ├── routing/                 # 路由、重试、熔断
-│   ├── catalog/                 # 模型、价格、活动
-│   ├── adapters/                # 供应商协议适配器
-│   └── persistence/             # 数据库与加密存储
-├── web/                         # React + TypeScript 管理端（计划）
+├── server/                      # FastAPI 网关、管理接口与 SQLite
+├── web/                         # Vue 3 + TypeScript 管理端
 ├── contracts/
-│   └── openapi.yaml             # API 单一事实来源（计划）
-├── infra/
-│   ├── docker-compose.yml       # 本地联调（计划）
-│   └── migrations/              # 数据库迁移（计划）
+│   └── openapi.yaml             # API 契约
+├── mock_upstream/               # 可控故障的模拟上游
+├── app/                         # 历史 Android 工程（当前不开发）
 └── docs/
 ```
 
@@ -146,4 +138,3 @@ TS/
 - 流式响应在首 Token 前可切换；首 Token 后不会静默重放。
 - 管理页面、日志和数据库中不存在完整上游 API Key 明文。
 - 每条价格和活动都能追溯来源、核对时间与有效期。
-

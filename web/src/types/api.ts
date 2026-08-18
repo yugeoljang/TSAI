@@ -95,6 +95,18 @@ export interface ModelCatalogEntry {
   verifiedAt?: string | null
 }
 
+export interface ModelCatalogCreate {
+  providerId: string
+  upstreamModelId: string
+  displayName: string
+  contextWindow?: number | null
+  enabled?: boolean
+  sourceUrl: string
+  verifiedAt: string
+}
+
+export type ModelCatalogUpdate = Partial<Omit<ModelCatalogCreate, 'providerId'>>
+
 export interface PriceSnapshot {
   id: string
   providerId: string
@@ -106,9 +118,22 @@ export interface PriceSnapshot {
   sourceUrl?: string | null
   effectiveFrom?: string | null
   verifiedAt?: string | null
+  isCurrent: boolean
+}
+
+export interface PriceSnapshotCreate {
+  modelCatalogEntryId: string
+  currency: string
+  inputPricePerMillionTokens?: number | null
+  outputPricePerMillionTokens?: number | null
+  sourceUrl: string
+  effectiveFrom: string
+  verifiedAt: string
 }
 
 export type PromotionType = 'discount' | 'credit' | 'price_change'
+export type PromotionStatus = 'draft' | 'verified' | 'expired'
+export type PromotionLifecycleStatus = 'draft' | 'upcoming' | 'active' | 'expired'
 
 export interface Promotion {
   id: string
@@ -121,8 +146,24 @@ export interface Promotion {
   endsAt?: string | null
   /** 由后端按当前时间推导 */
   active: boolean
+  status: PromotionStatus
+  lifecycleStatus: PromotionLifecycleStatus
   verifiedAt?: string | null
 }
+
+export interface PromotionCreate {
+  providerId: string
+  title: string
+  type: PromotionType
+  description?: string | null
+  sourceUrl?: string | null
+  startsAt?: string | null
+  endsAt?: string | null
+  status?: PromotionStatus
+  verifiedAt?: string | null
+}
+
+export type PromotionUpdate = Partial<PromotionCreate>
 
 // ---------- 分组 ----------
 

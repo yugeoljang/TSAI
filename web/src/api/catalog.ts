@@ -3,6 +3,11 @@ import type {
   Provider,
   ProviderCreate,
   ProviderUpdate,
+  ModelCatalogCreate,
+  ModelCatalogUpdate,
+  PriceSnapshotCreate,
+  PromotionCreate,
+  PromotionUpdate,
   UpstreamCreate,
   UpstreamEndpoint,
   UpstreamUpdate,
@@ -43,13 +48,37 @@ export const deleteUpstream = (id: string) => http.delete<void>(`${A}/upstreams/
 
 // ---------- 目录：模型 / 价格 / 活动 ----------
 
-export const listModels = (providerId?: string) =>
-  http.get<import('@/types/api').ModelCatalogEntry[]>(`${A}/models${qs({ providerId })}`).then((r) => r.data)
+export const listModels = (opts: { providerId?: string; includeDisabled?: boolean; keyword?: string } = {}) =>
+  http.get<import('@/types/api').ModelCatalogEntry[]>(`${A}/models${qs({ ...opts })}`).then((r) => r.data)
 
-export const listPrices = (providerId?: string) =>
-  http.get<import('@/types/api').PriceSnapshot[]>(`${A}/prices${qs({ providerId })}`).then((r) => r.data)
+export const createModel = (input: ModelCatalogCreate) =>
+  http.post<import('@/types/api').ModelCatalogEntry>(`${A}/models`, input).then((r) => r.data)
 
-export const listPromotions = (opts: { providerId?: string; activeOnly?: boolean } = {}) =>
+export const updateModel = (id: string, input: ModelCatalogUpdate) =>
+  http.patch<import('@/types/api').ModelCatalogEntry>(`${A}/models/${id}`, input).then((r) => r.data)
+
+export const deleteModel = (id: string) => http.delete<void>(`${A}/models/${id}`)
+
+export const listPrices = (opts: { providerId?: string; modelCatalogEntryId?: string; currentOnly?: boolean } = {}) =>
+  http.get<import('@/types/api').PriceSnapshot[]>(`${A}/prices${qs({ ...opts })}`).then((r) => r.data)
+
+export const listPriceHistory = (modelId: string) =>
+  http.get<import('@/types/api').PriceSnapshot[]>(`${A}/prices/history/${modelId}`).then((r) => r.data)
+
+export const createPrice = (input: PriceSnapshotCreate) =>
+  http.post<import('@/types/api').PriceSnapshot>(`${A}/prices`, input).then((r) => r.data)
+
+export const deletePrice = (id: string) => http.delete<void>(`${A}/prices/${id}`)
+
+export const listPromotions = (opts: { providerId?: string; activeOnly?: boolean; lifecycleStatus?: string } = {}) =>
   http
     .get<import('@/types/api').Promotion[]>(`${A}/promotions${qs({ ...opts })}`)
     .then((r) => r.data)
+
+export const createPromotion = (input: PromotionCreate) =>
+  http.post<import('@/types/api').Promotion>(`${A}/promotions`, input).then((r) => r.data)
+
+export const updatePromotion = (id: string, input: PromotionUpdate) =>
+  http.patch<import('@/types/api').Promotion>(`${A}/promotions/${id}`, input).then((r) => r.data)
+
+export const deletePromotion = (id: string) => http.delete<void>(`${A}/promotions/${id}`)

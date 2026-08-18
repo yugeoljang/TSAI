@@ -52,7 +52,8 @@ def run(page):
     expired_row = page.locator(".el-table__row", has_text="GPT-4.1 系列发布")
     check("promo-3 被标记为已过期", "已过期" in expired_row.inner_text())
 
-    page.get_by_text("只看进行中").click()
+    page.get_by_placeholder("全部状态").click()
+    page.get_by_role("option", name="进行中").click()
     page.wait_for_timeout(400)
     check("勾选后只剩 2 条进行中", page.locator(".el-table__row").count() == 2)
 
